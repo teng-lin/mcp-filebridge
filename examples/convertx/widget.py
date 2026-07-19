@@ -130,12 +130,14 @@ _WIDGET_HTML = """<!doctype html>
 
 
 def register_upload_widget(mcp: FastMCP, files, s3_public_endpoint: str, public_base_url: str,
-                           mint_upload) -> None:
+                           mint_upload, validate_target=None) -> None:
     """Register the inline upload widget + its tool. No-op if MCP_UPLOAD_WIDGET=0.
 
     ``mint_upload(filename)`` returns the offer dict (agent PUT url + human link +
     src_key) — wired to S3FileHelper.offer_upload. ``s3_public_endpoint`` is where
-    the widget PUTs (the CSP connect domain)."""
+    the widget PUTs (the CSP connect domain). ``validate_target(source_ext, target)``
+    (optional) raises if the conversion is unsupported — checked up front so the user
+    is told BEFORE uploading rather than after."""
     if os.environ.get(_WIDGET_FLAG) == "0":
         return
 
@@ -174,6 +176,9 @@ def register_upload_widget(mcp: FastMCP, files, s3_public_endpoint: str, public_
         has to pick the file. Do NOT ask them to paste the file, and do NOT pass a tool.
         Returns `src_key` (pass to convert), `upload_url` (the widget uses it), and
         `upload_link` (a click-to-upload fallback for the user)."""
+        # Reject an unsupported target up front (before the user wastes time uploading).
+        if validate_target and target and "." in filename:
+            validate_target(filename.rsplit(".", 1)[-1].lower(), target)  # raises with the valid targets
         offer = mint_upload(filename)
         return {
             "src_key": offer["src_key"],

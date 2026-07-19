@@ -111,6 +111,23 @@ def test_upload_file_returns_presigned_target(monkeypatch):
     assert data["upload_link"] == "https://convertx.hantekllc.com/u/abc123"  # link fallback
 
 
+def test_upload_file_rejects_unsupported_target_early():
+    # An unsupported target is caught at upload_file (before the user uploads),
+    # with the valid targets in the message.
+    def validator(ext, tgt):
+        if tgt == "xyz":
+            raise RuntimeError(f"Can't convert .{ext} to .{tgt}. .{ext} can convert to: mobi, pdf")
+    mcp = FastMCP(name="t")
+    widget.register_upload_widget(mcp, files=None, s3_public_endpoint=S3_PUBLIC,
+                                  public_base_url=BASE, mint_upload=_stub_mint, validate_target=validator)
+    with pytest.raises(Exception) as e:
+        asyncio.run(mcp.call_tool("upload_file", {"filename": "book.epub", "target": "xyz"}))
+    assert "can convert to" in str(e.value)
+    # a supported target still mints normally
+    ok = asyncio.run(mcp.call_tool("upload_file", {"filename": "book.epub", "target": "mobi"}))
+    assert ok.structured_content["src_key"]
+
+
 def test_resource_serves_widget_html(monkeypatch):
     mcp = _build(monkeypatch)
     contents = asyncio.run(mcp._read_resource_mcp(widget._WIDGET_URI)) \

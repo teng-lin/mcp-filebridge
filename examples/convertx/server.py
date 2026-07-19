@@ -103,16 +103,23 @@ class ConvertX:
         html = s.post(f"{self._b}/conversions", data={"fileType": file_type}).text
         return sorted(set(re.findall(r'value="([a-z0-9_]+,[a-z0-9_]+)"', html)))
 
+    def targets(self, source_ext):
+        """The target formats ConvertX can produce from source_ext (sorted, deduped)."""
+        return sorted({p.split(",", 1)[0] for p in self.conversions(source_ext)})
+
     def pick_tool(self, source_ext, target):
         """The converter tool ConvertX uses for source_ext → target (e.g. epub→mobi
-        is calibre, md→pdf is a latex/weasyprint tool). Raises with the valid targets
-        if the pair isn't supported — so the caller never sends an invalid combo."""
+        is calibre, md→pdf a latex/weasyprint tool). Raises a clean, actionable error
+        for an unsupported pair — so the caller never sends an invalid combo."""
         pairs = self.conversions(source_ext)
         tools = [p.split(",", 1)[1] for p in pairs if p.split(",", 1)[0] == target]
         if not tools:
-            targets = sorted({p.split(",", 1)[0] for p in pairs})
-            raise RuntimeError(f"ConvertX can't convert .{source_ext} to .{target}. "
-                               f"Supported targets: {', '.join(targets)}")
+            t = sorted({p.split(",", 1)[0] for p in pairs})
+            if not t:
+                raise RuntimeError(f"ConvertX doesn't recognize a .{source_ext} source file.")
+            shown = ", ".join(t[:30]) + (f", … (+{len(t) - 30} more)" if len(t) > 30 else "")
+            raise RuntimeError(f"Can't convert .{source_ext} to .{target}. "
+                               f".{source_ext} can convert to: {shown}")
         # Prefer calibre for e-books, otherwise the first (usually only) option.
         return "calibre" if "calibre" in tools else tools[0]
 
@@ -241,7 +248,8 @@ def build_server(auth=None):
     # folded into upload_file's result.
     mcp.tool(list_conversions)
     mcp.tool(convert)
-    register_upload_widget(mcp, files, S3_PUBLIC_ENDPOINT, PUBLIC_BASE_URL, _mint_upload)
+    register_upload_widget(mcp, files, S3_PUBLIC_ENDPOINT, PUBLIC_BASE_URL, _mint_upload,
+                           validate_target=lambda ext, tgt: cx.pick_tool(ext, tgt))  # raises if unsupported
     return mcp
 
 
