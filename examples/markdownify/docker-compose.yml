@@ -1,0 +1,57 @@
+# markdownify gateway stack: Python OAuth gateway (proxying the TS backend) + MinIO.
+#   cp .env.example .env   # set MCP_BEARER_TOKEN (+ OAuth for claude.ai)
+#   docker compose up -d --build
+# Ports differ from the ConvertX stack so both can run side by side.
+services:
+  minio:
+    image: quay.io/minio/minio:latest
+    command: server /data
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-spikekey}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-spikesecret}
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
+    ports: ["9101:9000"]           # host:container (9101 to avoid the ConvertX stack's 9100)
+    volumes: ["mdfy-minio:/data"]
+
+  gateway:
+    build:
+      context: ../..               # repo root (COPY ts/ + examples/convertx/oauth.py)
+      dockerfile: examples/markdownify/Dockerfile
+    image: markdownify-filebridge:local
+    restart: unless-stopped
+    environment:
+      S3_ENDPOINT: http://minio:9000                                   # gateway/backend -> bucket (internal)
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9101}  # client -> bucket (presign host)
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-spikekey}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-spikesecret}
+      S3_BUCKET: ${S3_BUCKET:-markdownify}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8090}        # gateway's public URL (/u widget + OAuth base)
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}
+      MCP_OAUTH_PASSWORD: ${MCP_OAUTH_PASSWORD:-}
+      MCP_OAUTH_BASE_URL: ${MCP_OAUTH_BASE_URL:-}
+      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}
+      MCP_OAUTH_CLIENT_SECRET: ${MCP_OAUTH_CLIENT_SECRET:-}
+      MCP_OAUTH_ALLOW_DCR: ${MCP_OAUTH_ALLOW_DCR:-}
+      MCP_OAUTH_TRUST_PROXY: "1"
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8090"
+    ports: ["${MCP_HOST_PORT:-8090}:8090"]
+    volumes: ["mdfy-oauth:/data"]  # OAuth state (a full-account secret)
+    depends_on:
+      minio: { condition: service_started }
+
+  # Optional: expose to claude.ai/ChatGPT via a Cloudflare tunnel (route a hostname → gateway:8090).
+  cloudflared:
+    profiles: ["cloudflare"]
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
+    depends_on:
+      gateway: { condition: service_healthy }
+
+volumes:
+  mdfy-minio:
+  mdfy-oauth:

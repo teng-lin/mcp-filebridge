@@ -1,31 +1,41 @@
-# Example (spike): markdownify + s3_filebridge (TypeScript)
+# Example: markdownify behind an OAuth gateway (TypeScript backend)
 
-Extends the [markdownify-mcp](https://github.com/zcaceres/markdownify-mcp) idea — "convert almost anything to Markdown" — with the two directions it lacks on a **remote** MCP host, using the **TypeScript** side of this repo (`ts/s3_filebridge.mjs`).
+Makes the [markdownify-mcp](https://github.com/zcaceres/markdownify-mcp) idea — "convert almost anything to Markdown" — work on **remote** hosts (claude.ai/ChatGPT), and does it as the repo's **TypeScript** proof.
 
-markdownify's `*-to-markdown` tools take a **local file path** and wrap `markitdown`. On claude.ai/ChatGPT the user's file isn't on the server's disk, so there's no way to reach it. This spike adds:
-
-- **Upload** — the user's file is PUT to S3 via a presigned URL, then **staged to a local path** so `markitdown` can read it. (`offerUpload` → `waitForKey` → pull → `markitdown`.)
-- **Download** — markdown is returned inline when small, but a huge input → huge markdown busts the tool-result cap, so above a threshold it's uploaded and returned as a **presigned `.md` URL**. (`offerDownload`.)
+Two components:
 
 ```
-claude.ai ─JSON-RPC─▶ markdownify (+ ts/s3_filebridge.mjs) ─▶ markitdown (local path)
-   └──── HTTPS PUT/GET bytes ────▶ S3 / R2 / MinIO
+claude.ai ─JSON-RPC─▶ gateway.py (Python: OAuth + create_proxy)
+                          │ stdio
+                          ▼
+                       server.mjs (TS MCP server: filebridge + markitdown)
+                          └── HTTPS PUT/GET ─▶ S3 / R2 / MinIO
 ```
 
-## Run the spike
+- **`server.mjs`** — a real TypeScript MCP server (stdio). Tools: `upload_file` (filebridge upload offer via `ts/s3_filebridge.mjs`) → `to_markdown` (stage the upload to a local path, run `markitdown`, return markdown inline or as a presigned `.md` when large). It does **no auth**.
+- **`gateway.py`** — an **OAuth-terminating proxy** (FastMCP `create_proxy`) that spawns `server.mjs`, owns OAuth (reusing `examples/convertx/oauth.py`: DCR + CIMD + password `/login`), validates the token, and forwards `/mcp` to the backend.
 
-Needs the local MinIO (`:9100`) and `markitdown`:
+## Why the gateway (and not OAuth-in-TS)
+A TS MCP server needs OAuth to work on claude.ai's connector UI — but re-implementing DCR/CIMD/PKCE on the TS SDK is a large lift. Instead, a **language-agnostic Python gateway** terminates OAuth and proxies to *any* backend. The backend just does its domain work. This is a [recognized production pattern](https://developers.openai.com/apps-sdk/build/auth) (Kong/Obot/TrueFoundry) and was de-risked before building: `tools/call` flows client → gateway(auth) → proxy → backend → back, both locally **and over a live Cloudflare tunnel**.
+
+Security notes (from the OAuth best-practices review): the token audience is the **gateway's** URI; the gateway **never forwards the client token** to the backend (confused-deputy); secure the gateway↔backend hop and keep the backend off the public internet. Here the backend is a **stdio child** of the gateway — not network-reachable at all — which satisfies that cleanly.
+
+## Run it
 
 ```bash
-pip install "markitdown[all]"        # the converter markdownify wraps
-npm install                          # @aws-sdk/*
-MARKITDOWN_BIN=$(command -v markitdown) node spike.mjs
+cp .env.example .env      # set MCP_BEARER_TOKEN (+ OAuth for claude.ai)
+docker compose up -d --build
+# in-network smoke (docx → markdown through gateway → TS backend → markitdown):
+docker cp report.docx markdownify-gateway-1:/tmp/report.docx
+docker compose exec gateway python - < smoke.py   # see README history / the session for the snippet
 ```
 
-It generates/uses `report.docx`, offers an upload, PUTs it to S3, stages it, runs `markitdown`, and asserts the markdown (heading + bullets + table) — then forces the large-output branch and fetches the `.md` back via the presigned URL.
+Ports differ from the ConvertX stack (MinIO on `9101`, gateway on `8090`) so both run side by side.
 
-## Status / notes
+## Connect from claude.ai / ChatGPT
+Same as `examples/convertx`: route a tunnel hostname → `gateway:8090`, set `PUBLIC_BASE_URL`/`MCP_OAUTH_BASE_URL` to it, add the connector, enter the password at `/login`. Point the bucket at R2/S3 (public) for real use.
 
-- **Validated spike, not a full server.** It proves the core loop (upload → stage → markitdown → markdown, + large→download) against real MinIO + real markitdown. It does **not** yet wire the MCP transport, the MCP-Apps widget, or OAuth — those are the same pieces as `examples/convertx/` (the widget HTML is language-neutral; OAuth would need the TS SDK's auth, since `oauth.py` is Python).
-- **This is the "TS twin works in a real server" proof** — it's the first thing to exercise `ts/s3_filebridge.mjs` beyond the parity test.
-- Complements ConvertX: ConvertX does *document*→markdown (docx/epub/html via pandoc); markitdown adds **PDF / PPTX / XLSX / image-OCR / audio-transcription** → markdown, which ConvertX can't.
+## Status
+- ✅ **Validated**: local (bearer gateway → TS backend → markitdown), in-container end-to-end, and the proxy hop over a live Cloudflare quick tunnel.
+- ⏳ **Not yet done**: the final claude.ai *UI* connect through a stable tunnel hostname (needs a Cloudflare dashboard route), and the MCP-Apps widget on the TS backend (the widget HTML is language-neutral; wiring its `_meta` on the TS SDK is the remaining polish).
+- Complements ConvertX: this adds **PDF/PPTX/XLSX/image-OCR/audio → markdown** (markitdown), which pandoc can't do.
