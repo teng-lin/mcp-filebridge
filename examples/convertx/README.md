@@ -9,9 +9,13 @@ claude.ai ──JSON-RPC (tools + presigned URLs)──▶ convertx-mcp ──HT
 ```
 
 ## Tools
-- `request_upload(filename)` → an `upload_required` offer (human widget + agent PUT paths).
+- `upload_file(source_format, target?, tool?)` → renders an **inline MCP-Apps upload widget** (a file picker in claude.ai / ChatGPT); the user picks the source file and it uploads straight to S3. Returns the `src_key` to pass to `convert`.
+- `request_upload(filename)` → a plain `upload_required` offer (signed-link fallback for hosts without inline widgets).
 - `list_conversions(file_type)` → the `format,tool` pairs ConvertX offers for that type.
-- `convert(src_key, target, tool="pandoc")` → runs the conversion, returns a `download_ready` offer.
+- `convert(src_key, target, tool="pandoc")` → waits for the upload to land, runs the conversion, returns a `download_ready` offer.
+
+### Inline upload widget
+`widget.py` (adapted from notebooklm-py) registers a `ui://` resource whose HTML renders in an MCP-Apps host's sandboxed iframe and PUTs the chosen file **directly to the S3 presigned URL**. The two host render-gates are handled: the claude.ai `sha256("<PUBLIC_BASE_URL>/mcp")[:32].claudemcpcontent.com` domain and the flat `_meta["ui/resourceUri"]`; the CSP `connect_domains` is the **bucket's public endpoint** (`S3_PUBLIC_ENDPOINT`), since that's where the widget uploads. Set `MCP_UPLOAD_WIDGET=0` to disable and fall back to links. *(Inline rendering is experimental + host-gated; the server-side wiring is verified, but the actual in-iframe render can only be confirmed inside claude.ai/ChatGPT.)*
 
 ## Run it locally
 

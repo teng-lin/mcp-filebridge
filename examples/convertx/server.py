@@ -134,9 +134,28 @@ def list_conversions(file_type: str) -> dict:
     return {"file_type": file_type, "targets": cx.conversions(file_type)}
 
 
+def _mint_upload(source_format: str):
+    """(upload_url, src_key) for a source of the given extension — wired to the widget."""
+    _ensure_bucket()
+    off = files.offer_upload(filename=f"source.{source_format or 'bin'}")
+    return off["agent_upload"]["url"], off["src_key"]
+
+
+def _wait_for_key(key: str, timeout: int = 90) -> None:
+    """Poll until the object lands (the widget/agent upload may still be in flight)."""
+    for _ in range(timeout):
+        try:
+            s3.head_object(Bucket=BUCKET, Key=key)
+            return
+        except Exception:
+            time.sleep(1)
+    raise RuntimeError(f"source not uploaded yet: {key}")
+
+
 def convert(src_key: str, target: str, tool: str = "pandoc") -> dict:
     """Convert an uploaded source (by src_key) to `target` via `tool`; returns a download offer."""
     _ensure_bucket()
+    _wait_for_key(src_key)  # the widget upload may not have finished when the model calls convert
     data = s3.get_object(Bucket=BUCKET, Key=src_key)["Body"].read()
     result = cx.convert(src_key.split("/")[-1], data, target, tool)
     out_key = f"out/{uuid.uuid4()}/{result.filename}"
@@ -146,10 +165,14 @@ def convert(src_key: str, target: str, tool: str = "pandoc") -> dict:
 
 def build_server(auth=None):
     from fastmcp import FastMCP
+
+    from widget import register_upload_widget
     mcp = FastMCP(name="convertx-filebridge", auth=auth)
-    mcp.tool(request_upload)
+    mcp.tool(request_upload)   # link fallback (portable)
     mcp.tool(list_conversions)
     mcp.tool(convert)
+    # Inline MCP-Apps upload widget (renders a file picker in claude.ai/ChatGPT).
+    register_upload_widget(mcp, files, S3_PUBLIC_ENDPOINT, PUBLIC_BASE_URL, _mint_upload)
     return mcp
 
 
