@@ -1,0 +1,5 @@
+boto3>=1.34
+requests>=2.31
+fastmcp==3.4.2
+uvicorn>=0.30
+starlette>=0.37

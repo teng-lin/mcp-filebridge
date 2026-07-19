@@ -1,0 +1,24 @@
+# ConvertX MCP server image. Build context is the REPO ROOT (so it can COPY both
+# the shared python/ helper and this example) — see docker-compose.yml build.context.
+FROM python:3.12-slim
+
+RUN useradd --create-home --uid 10001 app
+WORKDIR /app
+
+COPY examples/convertx/requirements.txt examples/convertx/requirements.txt
+RUN pip install --no-cache-dir -r examples/convertx/requirements.txt
+
+# Preserve the repo layout so server.py's relative import of ../../python resolves.
+COPY python/ /app/python/
+COPY examples/convertx/server.py /app/examples/convertx/server.py
+
+USER app
+ENV MCP_HOST=0.0.0.0 MCP_PORT=8080
+EXPOSE 8080
+
+# Liveness: stdlib-only TCP connect to the listener (no curl/wget needed; never
+# touches the bearer-gated /mcp route). Reads MCP_PORT from env at runtime.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import os,socket,sys; p=int(os.environ.get('MCP_PORT','8080')); s=socket.socket(); s.settimeout(2); sys.exit(0 if s.connect_ex(('127.0.0.1',p))==0 else 1)"]
+
+CMD ["python", "examples/convertx/server.py"]

@@ -25,7 +25,7 @@ python/s3_filebridge.py   # the Python helper: offer_upload / offer_download / a
 ts/s3_filebridge.mjs      # the TypeScript twin (@aws-sdk) — same offer JSON + widget, verbatim
 verify_parity.py          # golden-vector test: proves Python & TS emit byte-identical offers
 offer.golden.json         # the normalized offer contract (checked in)
-examples/convertx_mcp.py  # wraps the ConvertX converter behind an MCP server using the helper
+examples/convertx/        # deployable example: ConvertX behind an MCP server (Docker Compose, Makefile)
 ```
 
 ## The offer contract
@@ -72,13 +72,16 @@ cd ts && npm install && cd ..
 python3 verify_parity.py     # asserts Python and TS emit byte-identical offers
 ```
 
-ConvertX example additionally needs a ConvertX container on `:3300`:
+The ConvertX example is a self-contained Docker Compose stack (MCP server + ConvertX + MinIO):
 
 ```bash
-docker run -d --name convertx -p 3300:3000 -e JWT_SECRET=x -e ACCOUNT_REGISTRATION=true \
-  ghcr.io/c4illin/convertx:latest
-python3 examples/convertx_mcp.py
+cd examples/convertx
+make setup   # generate .env secrets
+make up      # build + start the stack
+make smoke   # end-to-end round-trip → valid .docx
 ```
+
+See [`examples/convertx/README.md`](examples/convertx/README.md) for the claude.ai deployment path (R2/S3 + tunnel).
 
 > ConvertX's HTTP contract is **unofficial** (login → `GET /` mints jobId → multipart `/upload` → `/convert` → poll `/progress` → `/download`) and its `auth` cookie is `Secure`; pin the image version. ConvertX is **AGPL-3.0** — offering it over a network triggers §13 copyleft. See `examples/convertx_mcp.py`.
 

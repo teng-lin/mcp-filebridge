@@ -55,9 +55,15 @@ def upload_page(put_url: str) -> str:
 
 class S3FileHelper:
     def __init__(self, s3, bucket: str, widget_base_url: str, *,
-                 upload_ttl: int = 300, download_ttl: int = 900,
+                 presign_s3=None, upload_ttl: int = 300, download_ttl: int = 900,
                  links: ShortLinkStore | None = None) -> None:
         self.s3, self.bucket = s3, bucket
+        # Presigned URLs are consumed by the CLIENT (browser / claude.ai sandbox),
+        # so they must name a PUBLIC endpoint — which is often not the internal one
+        # the server uses for get/put/head on a container network. Pass presign_s3
+        # (a client built against the public endpoint) to sign against it; internal
+        # ops stay on `s3`. Defaults to `s3` (single-endpoint / local case).
+        self.presign = presign_s3 or s3
         self.base = widget_base_url.rstrip("/")
         self.up_ttl, self.dl_ttl = upload_ttl, download_ttl
         self.links = links or ShortLinkStore()
@@ -71,7 +77,7 @@ class S3FileHelper:
         params = {"Bucket": self.bucket, "Key": key}
         if mime:  # signing ContentType means the PUT MUST send that header
             params["ContentType"] = mime
-        put = self.s3.generate_presigned_url("put_object", Params=params, ExpiresIn=self.up_ttl)
+        put = self.presign.generate_presigned_url("put_object", Params=params, ExpiresIn=self.up_ttl)
         return {
             "status": "upload_required",
             "src_key": key,
@@ -92,7 +98,7 @@ class S3FileHelper:
         }
 
     def offer_download(self, *, key: str, filename: str, mime: str) -> dict:
-        get = self.s3.generate_presigned_url(
+        get = self.presign.generate_presigned_url(
             "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=self.dl_ttl)
         return {"status": "download_ready", "filename": filename, "mime_type": mime,
                 "url": get, "expires_in_seconds": self.dl_ttl}

@@ -1,0 +1,76 @@
+# ConvertX MCP stack: the MCP server + the ConvertX converter + a MinIO bucket.
+#
+#   cp .env.example .env   # set MCP_BEARER_TOKEN + CONVERTX_JWT_SECRET
+#   docker compose up -d --build
+#   make smoke             # round-trip a file end to end
+#
+# The MCP server is the only thing you expose. For real claude.ai use, point the
+# bucket at Cloudflare R2 / AWS S3 (a single PUBLIC endpoint) instead of the bundled
+# MinIO, and put the MCP server behind a tunnel:
+#   docker compose --profile cloudflare up -d --build
+# See README.md ("Connect from claude.ai").
+services:
+  minio:
+    image: quay.io/minio/minio:latest
+    command: server /data
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-spikekey}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-spikesecret}
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"   # MinIO configures CORS here (no PutBucketCors API)
+    # Published so presigned URLs (S3_PUBLIC_ENDPOINT=http://localhost:9100) resolve
+    # from the host browser / curl. In prod you'd use R2/S3 and drop this service.
+    ports: ["9100:9000"]
+    volumes: ["minio-data:/data"]
+
+  convertx:
+    image: ghcr.io/c4illin/convertx:latest
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${CONVERTX_JWT_SECRET:?set CONVERTX_JWT_SECRET in .env}
+      ACCOUNT_REGISTRATION: "true"       # lets the MCP server self-create its account on first run
+    volumes: ["convertx-data:/app/data"]
+    # No published port: only the MCP server talks to it (internal network).
+
+  convertx-mcp:
+    build:
+      context: ../..                     # repo root, so the image can COPY python/ + this example
+      dockerfile: examples/convertx/Dockerfile
+    image: convertx-filebridge:local
+    restart: unless-stopped
+    environment:
+      # server -> bucket (internal compose DNS); server -> ConvertX (internal)
+      S3_ENDPOINT: http://minio:9000
+      CONVERTX_URL: http://convertx:3000
+      # client -> bucket: the PUBLIC host baked into presigned URLs. Local = the
+      # published MinIO port; prod = your R2/S3 endpoint.
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9100}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-spikekey}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-spikesecret}
+      S3_BUCKET: ${S3_BUCKET:-convertx}
+      CONVERTX_EMAIL: ${CONVERTX_EMAIL:-mcp@convertx.local}
+      CONVERTX_PASSWORD: ${CONVERTX_PASSWORD:?set CONVERTX_PASSWORD in .env}
+      # This server's own PUBLIC url (for /u/<shortid> widget links). Prod = tunnel URL.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}
+      MCP_HOST: "0.0.0.0"
+      MCP_ALLOW_EXTERNAL_BIND: "1"       # 0.0.0.0 bind is intentional; bearer still enforced if set
+    ports: ["${MCP_HOST_PORT:-8080}:8080"]
+    depends_on:
+      minio: { condition: service_started }
+      convertx: { condition: service_started }
+
+  # --- Optional: expose the MCP server to claude.ai over HTTPS (needs a CF tunnel) --
+  cloudflared:
+    profiles: ["cloudflare"]
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}  # route the tunnel hostname -> http://convertx-mcp:8080
+    depends_on:
+      convertx-mcp: { condition: service_healthy }
+
+volumes:
+  minio-data:
+  convertx-data:
