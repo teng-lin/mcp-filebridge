@@ -57,6 +57,10 @@ services:
       # Claude Code). Set both in .env; unset both to stay bearer-only.
       MCP_OAUTH_PASSWORD: ${MCP_OAUTH_PASSWORD:-}
       MCP_OAUTH_BASE_URL: ${MCP_OAUTH_BASE_URL:-}
+      # Static client ID (best practice) → disables open DCR; enter these in Claude's
+      # connector "Advanced settings". Unset both to fall back to open DCR.
+      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}
+      MCP_OAUTH_CLIENT_SECRET: ${MCP_OAUTH_CLIENT_SECRET:-}
       MCP_OAUTH_STATE_PATH: /data/oauth_state.json   # survives redeploys (volume below)
       MCP_OAUTH_TRUST_PROXY: "1"                      # behind Cloudflare: trust CF-Connecting-IP for the login throttle
       MCP_HOST: "0.0.0.0"

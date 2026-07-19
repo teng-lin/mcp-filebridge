@@ -51,6 +51,14 @@ OAUTH_PASSWORD_ENV = "MCP_OAUTH_PASSWORD"
 OAUTH_BASE_URL_ENV = "MCP_OAUTH_BASE_URL"
 TRUST_PROXY_ENV = "MCP_OAUTH_TRUST_PROXY"
 STATE_PATH_ENV = "MCP_OAUTH_STATE_PATH"
+# Static client ID (best practice — see the OAuth notebook): set this to a fixed
+# id and disable open Dynamic Client Registration. The user enters this id (and
+# secret, if set) in Claude's connector "Advanced settings". Unset → open DCR.
+CLIENT_ID_ENV = "MCP_OAUTH_CLIENT_ID"
+CLIENT_SECRET_ENV = "MCP_OAUTH_CLIENT_SECRET"
+REDIRECT_URIS_ENV = "MCP_OAUTH_REDIRECT_URIS"  # comma-separated; exact-matched
+# Claude.ai's fixed connector callback (exact-match required).
+DEFAULT_REDIRECT_URIS = ("https://claude.ai/api/mcp/auth_callback",)
 
 MIN_PASSWORD_LEN = 16
 MAX_CLIENTS = 100
@@ -119,6 +127,9 @@ class OAuthConfig:
     base_url: str
     state_path: Path | None = None
     trust_proxy: bool = False
+    client_id: str | None = None
+    client_secret: str | None = field(default=None, repr=False)
+    redirect_uris: tuple[str, ...] = ()
 
 
 def get_oauth_config() -> OAuthConfig | None:
@@ -137,9 +148,14 @@ def get_oauth_config() -> OAuthConfig | None:
         raise SystemExit(f"{OAUTH_PASSWORD_ENV} too weak: >= {MIN_PASSWORD_LEN} chars (random).")
     _validate_bare_https_origin(base_url, OAUTH_BASE_URL_ENV)
     sp = os.environ.get(STATE_PATH_ENV)
+    client_id = (os.environ.get(CLIENT_ID_ENV) or "").strip() or None
+    ruris = [u.strip() for u in (os.environ.get(REDIRECT_URIS_ENV) or "").split(",") if u.strip()]
     return OAuthConfig(password=password, base_url=base_url,
                        state_path=Path(sp) if sp else None,
-                       trust_proxy=os.environ.get(TRUST_PROXY_ENV) == "1")
+                       trust_proxy=os.environ.get(TRUST_PROXY_ENV) == "1",
+                       client_id=client_id,
+                       client_secret=(os.environ.get(CLIENT_SECRET_ENV) or "").strip() or None,
+                       redirect_uris=tuple(ruris) or (DEFAULT_REDIRECT_URIS if client_id else ()))
 
 
 def _client_ip(request: Request, *, trust_proxy: bool) -> str:
@@ -154,9 +170,13 @@ class SelfHostedOAuthProvider(InMemoryOAuthProvider):
     """InMemoryOAuthProvider + a password-gated /authorize, DoS bounds, and
     file-backed persistence of clients + tokens."""
 
-    def __init__(self, password, base_url, state_path=None, trust_proxy=False) -> None:
+    def __init__(self, password, base_url, state_path=None, trust_proxy=False,
+                 static_client_id=None, static_client_secret=None, redirect_uris=()) -> None:
+        # Static client ID → disable open DCR (close the /register write surface);
+        # the one client is pre-registered below. No static id → open DCR (legacy).
         super().__init__(base_url=base_url,
-                         client_registration_options=ClientRegistrationOptions(enabled=True))
+                         client_registration_options=ClientRegistrationOptions(
+                             enabled=static_client_id is None))
         self.__salt = secrets.token_bytes(16)
         self.__pw_digest = self._kdf(password)
         self._kdf_limiter = anyio.CapacityLimiter(4)
@@ -165,6 +185,21 @@ class SelfHostedOAuthProvider(InMemoryOAuthProvider):
         self._pending: dict[str, _Pending] = {}
         self._fail_times: dict[str, list[float]] = {}
         self._load_state()
+        if static_client_id:
+            self._register_static(static_client_id, static_client_secret, redirect_uris)
+
+    def _register_static(self, client_id, client_secret, redirect_uris) -> None:
+        from pydantic import AnyUrl
+        uris = [AnyUrl(u) for u in (redirect_uris or DEFAULT_REDIRECT_URIS)]
+        # Config wins over any persisted copy — the static client is authoritative.
+        self.clients[client_id] = OAuthClientInformationFull(
+            client_id=client_id,
+            client_secret=client_secret or None,
+            redirect_uris=uris,
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+            token_endpoint_auth_method="client_secret_post" if client_secret else "none",
+        )
 
     def _kdf(self, password: str) -> bytes:
         return hashlib.scrypt(password.encode("utf-8"), salt=self.__salt,
@@ -331,4 +366,7 @@ def build_auth(token: str | None, oauth: AuthProvider | None) -> AuthProvider | 
 
 def build_oauth_provider(config: OAuthConfig) -> AuthProvider:
     return SelfHostedOAuthProvider(password=config.password, base_url=config.base_url,
-                                   state_path=config.state_path, trust_proxy=config.trust_proxy)
+                                   state_path=config.state_path, trust_proxy=config.trust_proxy,
+                                   static_client_id=config.client_id,
+                                   static_client_secret=config.client_secret,
+                                   redirect_uris=config.redirect_uris)
