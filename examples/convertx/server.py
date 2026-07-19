@@ -39,13 +39,13 @@ S3_PUBLIC_ENDPOINT = _env("S3_PUBLIC_ENDPOINT", S3_ENDPOINT)          # client -
 S3_KEY = _env("S3_ACCESS_KEY", "spikekey")
 S3_SECRET = _env("S3_SECRET_KEY", "spikesecret")
 BUCKET = _env("S3_BUCKET", "convertx")
-PUBLIC_BASE_URL = _env("PUBLIC_BASE_URL", "http://localhost:8080")    # this server's public URL (for /u/ links)
+PUBLIC_BASE_URL = _env("PUBLIC_BASE_URL", "http://localhost:9400")    # this server's public URL (for /u/ links)
 CONVERTX_URL = _env("CONVERTX_URL", "http://localhost:3300")
 CX_EMAIL = _env("CONVERTX_EMAIL", "spike2@test.local")
 CX_PW = _env("CONVERTX_PASSWORD", "spikepass123")
 MCP_TOKEN = _env("MCP_BEARER_TOKEN", "")
 MCP_HOST = _env("MCP_HOST", "127.0.0.1")
-MCP_PORT = int(_env("MCP_PORT", "8080"))
+MCP_PORT = int(_env("MCP_PORT", "9400"))
 ALLOW_EXTERNAL_BIND = _env("MCP_ALLOW_EXTERNAL_BIND", "") == "1"
 
 

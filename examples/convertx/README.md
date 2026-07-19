@@ -23,7 +23,7 @@ make logs       # tail the server
 make down       # stop
 ```
 
-The MCP endpoint is `http://localhost:8080/mcp` (add `Authorization: Bearer <MCP_BEARER_TOKEN>` once set).
+The MCP endpoint is `http://localhost:9400/mcp` (add `Authorization: Bearer <MCP_BEARER_TOKEN>` once set).
 
 ## How the pieces talk (two S3 endpoints)
 
@@ -39,7 +39,7 @@ Two things must be publicly reachable: the **MCP endpoint** and the **bucket**.
 1. **Bucket:** the simplest correct choice is **Cloudflare R2 or AWS S3** — one public endpoint, reachable by both the server and the client, no MinIO to expose. Set `S3_PUBLIC_ENDPOINT` (and `S3_ENDPOINT`) to it and drop the `minio` service. On S3/R2, `set_bucket_cors()` also configures browser CORS for the upload widget (MinIO does it via `MINIO_API_CORS_ALLOW_ORIGIN`).
 2. **MCP endpoint:** put `convertx-mcp` behind a tunnel and set `PUBLIC_BASE_URL` to the tunnel hostname:
    ```bash
-   # set CF_TUNNEL_TOKEN in .env, route the hostname → http://convertx-mcp:8080
+   # set CF_TUNNEL_TOKEN in .env, route the hostname → http://convertx-mcp:9400
    docker compose --profile cloudflare up -d --build
    ```
 3. **Upload from the sandbox:** whitelist the bucket's domain under claude.ai → Settings → Capabilities → Code execution → Additional allowed domains, so the agent's `PUT` to the presigned URL is allowed.
