@@ -42,6 +42,7 @@ _WIDGET_HTML = """<!doctype html>
  input[type=file]{display:block;margin:12px 0;font-size:15px}
  button{font-size:15px;padding:9px 16px;border-radius:8px;border:0;background:#2f6df7;color:#fff}
  button[disabled]{opacity:.5}
+ progress{display:block;width:100%;margin-top:10px;height:8px}
  #out{white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:12px;color:#4a564e}
  @media(prefers-color-scheme:dark){body{color:#e6eae4}.card{background:#1d231f;border-color:#313a33}#out{color:#b7c0b8}}
 </style></head><body>
@@ -50,14 +51,16 @@ _WIDGET_HTML = """<!doctype html>
  <div id="sub" style="font-size:12px;color:#6b7a6e;margin-top:3px">starting…</div>
  <input id="f" type="file" disabled>
  <button id="up" disabled>Upload</button>
+ <progress id="pg" value="0" max="100" style="display:none"></progress>
  <div id="out"></div>
 </div>
 <script type="module">
- const sub=document.getElementById('sub'),out=document.getElementById('out'),fi=document.getElementById('f'),btn=document.getElementById('up');
+ const sub=document.getElementById('sub'),out=document.getElementById('out'),fi=document.getElementById('f'),btn=document.getElementById('up'),pg=document.getElementById('pg');
  const log=m=>{out.textContent+=(out.textContent?"\\n":"")+m;size();};
  const post=m=>{try{window.parent.postMessage(m,"*")}catch(e){}};
  const oai=window.openai;
- let initialized=false, uploadUrl=null, srcKey=null, target=null;
+ let initialized=false, uploadUrl=null, srcKey=null, target=null, cvSeq=0;
+ const CONVERT_TOOL="convert";   // hard allowlist: a spoofed postMessage can't redirect which tool runs
  const geturl=o=>o&&o.upload_url||null;
  function size(){post({jsonrpc:"2.0",method:"ui/notifications/size-changed",
    params:{height:document.documentElement.scrollHeight,width:document.documentElement.scrollWidth}});}
@@ -87,30 +90,40 @@ _WIDGET_HTML = """<!doctype html>
  function pullOai(){if(oai&&oai.toolOutput)consider(oai.toolOutput);}
  window.addEventListener("openai:set_globals",pullOai);
  let _pt=0;const _pi=setInterval(()=>{pullOai();if(uploadUrl||++_pt>66)clearInterval(_pi);},300);
+ // XHR upload so we can drive a progress bar (fetch can't report upload progress) — nlm-py #1950.
+ function putFile(url,file,onp){return new Promise((res,rej)=>{
+   const x=new XMLHttpRequest(); x.open("PUT",url);
+   x.upload.onprogress=e=>{if(e.lengthComputable&&onp)onp(Math.round(e.loaded/e.total*100));};
+   x.onload=()=>res({ok:x.status>=200&&x.status<300,status:x.status});
+   x.onerror=()=>rej(new Error("network")); x.onabort=()=>rej(new Error("abort")); x.send(file);});}
+ // Auto-convert after upload — nlm-py #1948. ChatGPT: window.openai.callTool returns the result
+ // (so we can show a link). claude.ai/MCP-Apps: a tools/call postMessage (fire-and-forget → the
+ // download link reaches the MODEL, which shows it in chat). Hard-allowlist CONVERT_TOOL; the args
+ // are our own just-minted src_key/target, so a spoofed message can't redirect the tool or its input.
+ function autoConvert(){ if(!srcKey)return null; const args={src_key:srcKey,target:target||""};
+   if(oai&&typeof oai.callTool==="function"){try{return oai.callTool(CONVERT_TOOL,args);}catch(e){return null;}}
+   post({jsonrpc:"2.0",id:"cv"+(++cvSeq),method:"tools/call",params:{name:CONVERT_TOOL,arguments:args}}); return null;}
  fi.addEventListener('change',()=>{btn.disabled=!(fi.files&&fi.files.length);});
  btn.addEventListener('click',async()=>{
    const file=fi.files&&fi.files[0]; if(!file||!uploadUrl){log("no file selected yet");return;}
    if(file.size>200*1024*1024){log("❌ exceeds 200 MB");return;}
-   btn.disabled=true; fi.disabled=true; log("uploading "+file.name+" ("+file.size+" B)…");
+   btn.disabled=true; fi.disabled=true; pg.style.display="block"; pg.value=0;
    try{
-     const res=await fetch(uploadUrl,{method:"PUT",body:file});   // direct PUT to the S3 presigned URL
+     const res=await putFile(uploadUrl,file,pct=>{pg.value=pct;sub.textContent="uploading "+file.name+" — "+pct+"%";});
+     pg.style.display="none";
      if(!res.ok){log("["+res.status+"] upload failed");btn.disabled=false;fi.disabled=false;return;}
      log("uploaded ✓");
-     // Auto-convert: if the host lets the widget call tools (ChatGPT), fire convert now
-     // so the user needs no second command. claude.ai lacks this → the model chains convert.
-     if(oai&&typeof oai.callTool==="function"&&srcKey){
-       sub.textContent="converting…";
-       try{
-         const r=await oai.callTool("convert",{src_key:srcKey,target:target||""});
-         const o=(r&&(r.structuredContent||r.toolResult||r))||{};
+     const p=autoConvert();
+     if(p){ sub.textContent="converting…";   // ChatGPT: result comes back → show a download link
+       try{ const r=await p; const o=(r&&(r.structuredContent||r.toolResult||r))||{};
          sub.textContent="✅ converted";
          if(o.url){const a=document.createElement("a");a.href=o.url;a.target="_blank";
            a.textContent="⬇ Download "+(o.filename||"result");
            a.style.cssText="display:block;margin-top:10px;font-weight:600;color:#2f6df7";
            document.querySelector(".card").appendChild(a);size();}
-       }catch(e){sub.textContent="✅ uploaded — ask me to convert it";log("auto-convert unavailable: "+e);}
-     } else { sub.textContent="✅ uploaded — ask me to convert it"; }
-   }catch(e){log("❌ upload failed (CSP/CORS/network): "+e);btn.disabled=false;fi.disabled=false;}
+       }catch(e){sub.textContent="✅ uploaded — ask me to convert it";}
+     } else { sub.textContent="✅ uploaded — converting…"; }   // claude.ai: convert runs; link appears in chat
+   }catch(e){pg.style.display="none";log("❌ upload failed (CSP/CORS/network): "+e);btn.disabled=false;fi.disabled=false;}
  });
 </script></body></html>"""
 
@@ -119,9 +132,9 @@ def register_upload_widget(mcp: FastMCP, files, s3_public_endpoint: str, public_
                            mint_upload) -> None:
     """Register the inline upload widget + its tool. No-op if MCP_UPLOAD_WIDGET=0.
 
-    ``mint_upload(source_format)`` returns ``(upload_url, src_key)`` — the caller
-    wires it to S3FileHelper.offer_upload. ``s3_public_endpoint`` is where the
-    widget PUTs (the CSP connect domain)."""
+    ``mint_upload(filename)`` returns the offer dict (agent PUT url + human link +
+    src_key) — wired to S3FileHelper.offer_upload. ``s3_public_endpoint`` is where
+    the widget PUTs (the CSP connect domain)."""
     if os.environ.get(_WIDGET_FLAG) == "0":
         return
 

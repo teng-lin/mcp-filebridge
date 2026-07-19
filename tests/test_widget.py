@@ -45,9 +45,25 @@ def test_widget_domain_is_deterministic_sha256_gate():
 def test_widget_html_has_picker_and_direct_put():
     html = widget._WIDGET_HTML
     assert 'type="file"' in html
-    assert 'method:"PUT"' in html                       # direct PUT to the presigned URL
+    assert 'x.open("PUT"' in html                        # direct PUT to the presigned URL (via XHR)
     assert "ui/notifications/initialized" in html       # claude.ai render-gate signal
     assert "window.openai" in html                      # ChatGPT path
+
+
+def test_widget_upload_has_progress_bar():
+    # nlm-py #1950: XHR (not fetch) so upload progress can drive the <progress> bar
+    html = widget._WIDGET_HTML
+    assert "XMLHttpRequest" in html and "upload.onprogress" in html
+    assert "<progress" in html
+    assert "await fetch(" not in html                   # fetch can't report upload progress
+
+
+def test_widget_auto_convert_both_hosts_with_allowlist():
+    # nlm-py #1948: auto-convert after upload — ChatGPT callTool AND claude.ai tools/call postMessage
+    html = widget._WIDGET_HTML
+    assert "callTool(CONVERT_TOOL" in html              # ChatGPT path
+    assert 'method:"tools/call"' in html                # claude.ai postMessage path
+    assert 'CONVERT_TOOL="convert"' in html             # hard allowlist (anti-spoof)
 
 
 # --- registration ---------------------------------------------------------- #
