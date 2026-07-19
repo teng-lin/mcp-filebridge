@@ -163,7 +163,10 @@ def convert(src_key: str, target: str, tool: str = "pandoc") -> dict:
     return files.offer_download(key=out_key, filename=result.filename, mime=_MIME)
 
 
-class _LogMiddleware:
+from fastmcp.server.middleware.middleware import Middleware
+
+
+class _LogMiddleware(Middleware):
     """Log the MCP calls claude.ai/ChatGPT make, to diagnose widget rendering."""
     async def on_list_tools(self, context, call_next):
         sys.stderr.write("[mcp] list_tools\n"); sys.stderr.flush()
