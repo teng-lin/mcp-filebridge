@@ -1,0 +1,18 @@
+{
+  "agent_instructions": "Try agent_upload (PUT the bytes); else surface human_upload.url to the user.",
+  "agent_upload": {
+    "body": "raw file bytes (not multipart/form-data)",
+    "example": "curl -X PUT -T <file> 'http://localhost:9100/s3fb-spike/src/<UUID>/spike.txt?<sigv4-presigned>'",
+    "method": "PUT",
+    "returns": "{\"status\":\"added\",\"key\":...}",
+    "url": "http://localhost:9100/s3fb-spike/src/<UUID>/spike.txt?<sigv4-presigned>"
+  },
+  "expires_in_seconds": 300,
+  "human_upload": {
+    "instructions": "Open on the device that has the file, then pick it. Works on mobile.",
+    "url": "https://mcp.example.test/u/<SHORTID>"
+  },
+  "mime_locked": false,
+  "src_key": "src/<UUID>/spike.txt",
+  "status": "upload_required"
+}
