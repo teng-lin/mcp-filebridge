@@ -86,7 +86,9 @@ services:
     restart: unless-stopped
     environment:
       S3_ENDPOINT: http://minio:9000                                   # internal (shared MinIO)
-      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-https://s3.hantekllc.com}  # presign host (client-facing)
+      # Presign host baked into upload/download URLs — markdownify's OWN s3 hostname
+      # (served by the dedicated tunnel below), so it never depends on ConvertX's tunnel.
+      S3_PUBLIC_ENDPOINT: ${MARKDOWNIFY_S3_PUBLIC_ENDPOINT:-https://s3-markdownify.hantekllc.com}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-spikekey}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-spikesecret}
       S3_BUCKET: markdownify                                           # its own bucket on the shared MinIO
@@ -100,13 +102,26 @@ services:
       MCP_OAUTH_TRUST_PROXY: "1"
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8090"
-    # Published so a HOST-run cloudflared (tunnel connector not on convertx_default)
-    # can reach it at http://localhost:8090. If your connector IS on convertx_default,
-    # drop this and route to http://markdownify-gateway:8090 instead.
-    ports: ["8090:8090"]
+    ports: ["8090:8090"]                 # also reachable on the host (optional; docker-DNS is used below)
     volumes: ["mdfy-oauth:/data"]        # its own OAuth state (a full-account secret)
     depends_on:
       minio: { condition: service_started }
+
+  # Dedicated Cloudflare tunnel connector for the markdownify app + its S3 bucket.
+  # Runs ON convertx_default so it resolves both services by docker-DNS. Configure the
+  # tunnel's two Public Hostnames in the CF dashboard:
+  #   s3-markdownify.hantekllc.com -> http://minio:9000
+  #   markdownify.hantekllc.com    -> http://markdownify-gateway:8090
+  apps-cloudflared:
+    profiles: ["markdownify"]
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${APPS_CF_TUNNEL_TOKEN:-}
+      TUNNEL_TRANSPORT_PROTOCOL: http2   # QUIC/UDP 7844 egress is blocked here -> control stream fails
+    depends_on:
+      markdownify-gateway: { condition: service_healthy }
 
   # --- Optional: expose the MCP server to claude.ai over HTTPS (needs a CF tunnel) --
   cloudflared:
