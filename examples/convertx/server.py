@@ -103,6 +103,19 @@ class ConvertX:
         html = s.post(f"{self._b}/conversions", data={"fileType": file_type}).text
         return sorted(set(re.findall(r'value="([a-z0-9_]+,[a-z0-9_]+)"', html)))
 
+    def pick_tool(self, source_ext, target):
+        """The converter tool ConvertX uses for source_ext → target (e.g. epub→mobi
+        is calibre, md→pdf is a latex/weasyprint tool). Raises with the valid targets
+        if the pair isn't supported — so the caller never sends an invalid combo."""
+        pairs = self.conversions(source_ext)
+        tools = [p.split(",", 1)[1] for p in pairs if p.split(",", 1)[0] == target]
+        if not tools:
+            targets = sorted({p.split(",", 1)[0] for p in pairs})
+            raise RuntimeError(f"ConvertX can't convert .{source_ext} to .{target}. "
+                               f"Supported targets: {', '.join(targets)}")
+        # Prefer calibre for e-books, otherwise the first (usually only) option.
+        return "calibre" if "calibre" in tools else tools[0]
+
     def convert(self, filename, data, target, tool):
         s, _, job = self._session()
         s.post(f"{self._b}/upload", files={"file": (filename, data)})
@@ -123,22 +136,18 @@ _MIME = "application/octet-stream"
 
 
 # ---- MCP tools ----------------------------------------------------------- #
-def request_upload(filename: str) -> dict:
-    """Get a presigned upload offer (human widget + agent PUT paths) for a source file."""
-    _ensure_bucket()
-    return files.offer_upload(filename=filename)
-
-
 def list_conversions(file_type: str) -> dict:
     """List the `format,tool` pairs ConvertX can convert `file_type` into."""
     return {"file_type": file_type, "targets": cx.conversions(file_type)}
 
 
-def _mint_upload(source_format: str):
-    """(upload_url, src_key) for a source of the given extension — wired to the widget."""
+def _mint_upload(filename: str) -> dict:
+    """The upload offer for a source file — wired to the widget. The key carries the
+    REAL filename so the converted output keeps the same stem (MyBook.epub → MyBook.mobi).
+    Returns the full offer (agent PUT url + human /u/ link + src_key)."""
     _ensure_bucket()
-    off = files.offer_upload(filename=f"source.{source_format or 'bin'}")
-    return off["agent_upload"]["url"], off["src_key"]
+    safe = os.path.basename((filename or "").strip()) or "file"
+    return files.offer_upload(filename=safe)
 
 
 def _wait_for_key(key: str, timeout: int = 90) -> None:
@@ -152,12 +161,31 @@ def _wait_for_key(key: str, timeout: int = 90) -> None:
     raise RuntimeError(f"source not uploaded yet: {key}")
 
 
-def convert(src_key: str, target: str, tool: str = "pandoc") -> dict:
-    """Convert an uploaded source (by src_key) to `target` via `tool`; returns a download offer."""
+_MIN_RESULT_BYTES = 64  # ConvertX error text ("Something went wrong") is ~21 bytes
+
+
+def convert(src_key: str, target: str, tool: str = "auto") -> dict:
+    """Convert the file the user uploaded via `upload_file` (identified by `src_key`) to
+    `target` (e.g. "pdf", "docx", "mobi"). The right converter is chosen automatically —
+    do NOT guess a `tool`. Waits for the upload to finish, runs the conversion, and
+    returns a download link. This is STEP 2 — call `upload_file` first."""
     _ensure_bucket()
     _wait_for_key(src_key)  # the widget upload may not have finished when the model calls convert
     data = s3.get_object(Bucket=BUCKET, Key=src_key)["Body"].read()
-    result = cx.convert(src_key.split("/")[-1], data, target, tool)
+    filename = src_key.split("/")[-1]
+    source_ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+    # Smart tool selection: ask ConvertX which converter handles source_ext → target.
+    # Raises a helpful "supported targets: …" error for an unsupported pair.
+    if not tool or tool == "auto":
+        tool = cx.pick_tool(source_ext, target)
+    result = cx.convert(filename, data, target, tool)
+    # A failed conversion still yields a downloadable stub (ConvertX's error text) —
+    # don't pass that off as the result. Fail loudly with what went wrong.
+    if len(result.content) < _MIN_RESULT_BYTES:
+        raise RuntimeError(
+            f"conversion .{source_ext} → .{target} (via {tool}) produced no real output "
+            f"({len(result.content)} bytes: {result.content[:120]!r}). The source may be "
+            f"invalid or the pair unsupported.")
     out_key = f"out/{uuid.uuid4()}/{result.filename}"
     s3.put_object(Bucket=BUCKET, Key=out_key, Body=result.content)
     return files.offer_download(key=out_key, filename=result.filename, mime=_MIME)
@@ -191,10 +219,11 @@ def build_server(auth=None):
     from widget import register_upload_widget
     mcp = FastMCP(name="convertx-filebridge", auth=auth)
     mcp.add_middleware(_LogMiddleware())
-    mcp.tool(request_upload)   # link fallback (portable)
+    # Step 1 (upload_file, from the widget module) → Step 2 (convert). list_conversions
+    # is optional discovery. No separate "request_upload" tool — the link fallback is
+    # folded into upload_file's result.
     mcp.tool(list_conversions)
     mcp.tool(convert)
-    # Inline MCP-Apps upload widget (renders a file picker in claude.ai/ChatGPT).
     register_upload_widget(mcp, files, S3_PUBLIC_ENDPOINT, PUBLIC_BASE_URL, _mint_upload)
     return mcp
 

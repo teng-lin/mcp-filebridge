@@ -16,9 +16,12 @@ S3_PUBLIC = "https://s3.hantekllc.com"
 BASE = "https://convertx.hantekllc.com"
 
 
-def _stub_mint(source_format):
-    return f"https://s3.hantekllc.com/bucket/src/uuid/source.{source_format}?X-Amz-Signature=x", \
-           f"src/uuid/source.{source_format}"
+def _stub_mint(filename):
+    return {
+        "src_key": f"src/uuid/{filename}",
+        "agent_upload": {"url": f"https://s3.hantekllc.com/bucket/src/uuid/{filename}?X-Amz-Signature=x"},
+        "human_upload": {"url": "https://convertx.hantekllc.com/u/abc123"},
+    }
 
 
 def _build(monkeypatch, disabled=False):
@@ -82,11 +85,12 @@ def test_disabled_flag_is_noop(monkeypatch):
 # --- the tool result the widget consumes ----------------------------------- #
 def test_upload_file_returns_presigned_target(monkeypatch):
     mcp = _build(monkeypatch)
-    result = asyncio.run(mcp.call_tool("upload_file", {"source_format": "docx", "target": "pdf"}))
+    result = asyncio.run(mcp.call_tool("upload_file", {"filename": "resume.docx", "target": "pdf"}))
     data = result.structured_content
-    assert data["src_key"] == "src/uuid/source.docx"
+    assert data["src_key"] == "src/uuid/resume.docx"   # output keeps the stem → resume.pdf
     assert data["target"] == "pdf"
     assert "s3.hantekllc.com" in data["upload_url"] and "X-Amz-Signature" in data["upload_url"]
+    assert data["upload_link"] == "https://convertx.hantekllc.com/u/abc123"  # link fallback
 
 
 def test_resource_serves_widget_html(monkeypatch):

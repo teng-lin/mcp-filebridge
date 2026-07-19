@@ -135,11 +135,19 @@ def register_upload_widget(mcp: FastMCP, files, s3_public_endpoint: str, public_
         meta={"ui/resourceUri": _WIDGET_URI, "openai/outputTemplate": _WIDGET_URI},
         app=AppConfig(resource_uri=_WIDGET_URI, visibility=["model"]),
     )
-    def upload_file(source_format: str, target: str = "", tool: str = "pandoc") -> dict[str, Any]:
-        """Show an inline file picker to upload the SOURCE file to convert. `source_format`
-        is the source file's extension (e.g. "docx", "md", "png"). Renders inline in
-        MCP-Apps hosts (claude.ai / ChatGPT); the user picks the file and it uploads
-        directly. AFTER the user uploads, call `convert` with the returned `src_key`
-        and the desired `target` format."""
-        upload_url, src_key = mint_upload(source_format)
-        return {"upload_url": upload_url, "src_key": src_key, "target": target, "tool": tool}
+    def upload_file(filename: str, target: str = "") -> dict[str, Any]:
+        """STEP 1 of converting a file: get the source file from the user. Shows an inline
+        file picker (or, if the host can't render it, surface `upload_link` to the user).
+        `filename` is the source file's name WITH extension (e.g. "MyBook.epub", "report.docx")
+        — it sets both the input type and the output name (MyBook.epub → MyBook.mobi). Once
+        the user has uploaded, call `convert(src_key, target)` — do NOT ask them to paste the
+        file, and do NOT pass a tool (convert picks the right converter automatically).
+        Returns `src_key` (pass to convert), `upload_url` (the widget uses it), and
+        `upload_link` (a click-to-upload fallback for the user)."""
+        offer = mint_upload(filename)
+        return {
+            "src_key": offer["src_key"],
+            "upload_url": offer["agent_upload"]["url"],   # the widget PUTs here
+            "upload_link": offer["human_upload"]["url"],  # fallback if the widget doesn't render
+            "target": target,
+        }

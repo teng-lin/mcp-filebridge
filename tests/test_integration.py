@@ -167,13 +167,14 @@ def test_convertx_roundtrip(monkeypatch):
     monkeypatch.setenv("S3_BUCKET", "pytest-convertx")
     import server  # module-level clients target localhost:9100 / :3300 by default
 
-    offer = server.request_upload("sample.md")
+    offer = server._mint_upload("sample.md")   # the upload offer (upload_file's underlying mint)
     assert offer["status"] == "upload_required"
     put = requests.put(offer["agent_upload"]["url"], data=b"# Sample\n\nintegration test.\n")
     assert put.status_code == 200
 
-    out = server.convert(offer["src_key"], "docx")
+    out = server.convert(offer["src_key"], "docx")  # tool auto-picked
     assert out["status"] == "download_ready"
+    assert out["filename"] == "sample.docx"   # same stem, new suffix
     got = requests.get(out["url"])
     assert got.status_code == 200
     assert got.content[:4] == b"PK\x03\x04"  # valid .docx (zip)
