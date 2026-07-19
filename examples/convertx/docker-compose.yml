@@ -53,9 +53,16 @@ services:
       # This server's own PUBLIC url (for /u/<shortid> widget links). Prod = tunnel URL.
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:9400}
       MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}
+      # Self-hosted OAuth for the claude.ai web connector (bearer keeps working for
+      # Claude Code). Set both in .env; unset both to stay bearer-only.
+      MCP_OAUTH_PASSWORD: ${MCP_OAUTH_PASSWORD:-}
+      MCP_OAUTH_BASE_URL: ${MCP_OAUTH_BASE_URL:-}
+      MCP_OAUTH_STATE_PATH: /data/oauth_state.json   # survives redeploys (volume below)
+      MCP_OAUTH_TRUST_PROXY: "1"                      # behind Cloudflare: trust CF-Connecting-IP for the login throttle
       MCP_HOST: "0.0.0.0"
-      MCP_ALLOW_EXTERNAL_BIND: "1"       # 0.0.0.0 bind is intentional; bearer still enforced if set
+      MCP_ALLOW_EXTERNAL_BIND: "1"       # 0.0.0.0 bind is intentional; bearer/OAuth still enforced
     ports: ["${MCP_HOST_PORT:-9400}:9400"]
+    volumes: ["oauth-state:/data"]       # OAuth client registry + tokens (a full-account secret)
     depends_on:
       minio: { condition: service_started }
       convertx: { condition: service_started }
@@ -74,3 +81,4 @@ services:
 volumes:
   minio-data:
   convertx-data:
+  oauth-state:

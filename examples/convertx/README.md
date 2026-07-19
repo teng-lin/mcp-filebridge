@@ -43,10 +43,16 @@ Two things must be publicly reachable: the **MCP endpoint** and the **bucket**.
    docker compose --profile cloudflare up -d --build
    ```
 3. **Upload from the sandbox:** whitelist the bucket's domain under claude.ai → Settings → Capabilities → Code execution → Additional allowed domains, so the agent's `PUT` to the presigned URL is allowed.
+4. **Add the connector:** in claude.ai, add a custom connector pointing at `https://<host>/mcp`. claude.ai discovers the OAuth server, registers itself (DCR + PKCE), and redirects you to `/login` — enter `MCP_OAUTH_PASSWORD` once to authorize.
 
 ## Auth model
-- `/mcp` is **bearer-gated** (fail-closed: a non-loopback bind with no bearer and no `MCP_ALLOW_EXTERNAL_BIND=1` refuses to start).
-- `/u/<shortid>` (the upload widget) is **public** — the human opens it in a browser without the MCP credential. It's protected by the unguessable id and the presigned URL's own signature/expiry, not the bearer.
+Auth is handled by FastMCP and composed via `MultiAuth` — set either or both:
+- **Bearer** (`MCP_BEARER_TOKEN`) — for Claude Code / Desktop (send `Authorization: Bearer …`).
+- **Self-hosted OAuth** (`MCP_OAUTH_PASSWORD` + `MCP_OAUTH_BASE_URL`) — for the **claude.ai web** connector, whose UI is OAuth-only. A tiny single-tenant OAuth 2.1 server (`oauth.py`, adapted from zlibrary-mcp) runs the full DCR/PKCE/token flow via `InMemoryOAuthProvider`, gated by one password at `/login` (scrypt-hashed, constant-time, per-IP throttled). State persists to `MCP_OAUTH_STATE_PATH` (a full-account secret — the `oauth-state` volume).
+
+Fail-closed: a non-loopback bind with **no** bearer, **no** OAuth, and no `MCP_ALLOW_EXTERNAL_BIND=1` refuses to start.
+
+`/mcp` is gated; the OAuth routes (`/authorize`, `/token`, `/register`, metadata, `/login`) and the `/u/<shortid>` upload widget are **public** by design — the widget is protected by its unguessable id and the presigned URL's own signature, not the connector auth.
 
 ## Caveats
 - **ConvertX's HTTP contract is unofficial** (login → `GET /` mints jobId → multipart `/upload` → `/convert` → poll `/progress` → `/download`; the `auth` cookie is `Secure`). **Pin the image** — it can change between releases.

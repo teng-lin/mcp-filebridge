@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r examples/convertx/requirements.txt
 # Preserve the repo layout so server.py's relative import of ../../python resolves.
 COPY python/ /app/python/
 COPY examples/convertx/server.py /app/examples/convertx/server.py
+COPY examples/convertx/oauth.py /app/examples/convertx/oauth.py
 
 USER app
 ENV MCP_HOST=0.0.0.0 MCP_PORT=9400

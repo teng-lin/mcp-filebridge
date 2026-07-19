@@ -144,9 +144,9 @@ def convert(src_key: str, target: str, tool: str = "pandoc") -> dict:
     return files.offer_download(key=out_key, filename=result.filename, mime=_MIME)
 
 
-def build_server():
+def build_server(auth=None):
     from fastmcp import FastMCP
-    mcp = FastMCP(name="convertx-filebridge")
+    mcp = FastMCP(name="convertx-filebridge", auth=auth)
     mcp.tool(request_upload)
     mcp.tool(list_conversions)
     mcp.tool(convert)
@@ -154,31 +154,28 @@ def build_server():
 
 
 def serve():
-    """Serve streamable-HTTP: MCP at /mcp (bearer-gated), widget at /u/<id> (public,
-    self-authorized by the unguessable id + the presigned URL's own signature)."""
+    """Serve streamable-HTTP. Auth is handled by FastMCP: /mcp is gated by the
+    bearer AND/OR self-hosted OAuth (claude.ai uses OAuth via MultiAuth). The
+    OAuth routes (/authorize, /token, /register, metadata, /login) and the
+    /u/<id> upload widget are public by design."""
     import uvicorn
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import JSONResponse
+    from oauth import build_auth, build_oauth_provider, get_oauth_config
 
+    oauth_cfg = get_oauth_config()  # None unless MCP_OAUTH_PASSWORD + BASE_URL set
     loopback = MCP_HOST in ("127.0.0.1", "::1", "localhost")
-    if not loopback and not MCP_TOKEN and not ALLOW_EXTERNAL_BIND:
-        sys.exit("refusing to bind non-loopback without MCP_BEARER_TOKEN "
-                 "(set it, or MCP_ALLOW_EXTERNAL_BIND=1 to override).")
+    if not loopback and not MCP_TOKEN and not oauth_cfg and not ALLOW_EXTERNAL_BIND:
+        sys.exit("refusing to bind non-loopback without auth: set MCP_BEARER_TOKEN "
+                 "and/or MCP_OAUTH_PASSWORD (+ MCP_OAUTH_BASE_URL), or MCP_ALLOW_EXTERNAL_BIND=1.")
 
-    mcp = build_server()
+    oauth = build_oauth_provider(oauth_cfg) if oauth_cfg else None
+    auth = build_auth(MCP_TOKEN or None, oauth)
+
+    mcp = build_server(auth=auth)
     app = mcp.http_app(path="/mcp")
-    app.router.routes.extend(files.routes())  # /u/<sid> widget
+    app.router.routes.extend(files.routes())  # /u/<sid> widget (public)
 
-    class BearerGuard(BaseHTTPMiddleware):
-        async def dispatch(self, request, call_next):
-            if MCP_TOKEN and request.url.path.startswith("/mcp") \
-                    and request.headers.get("authorization") != f"Bearer {MCP_TOKEN}":
-                return JSONResponse({"error": "unauthorized"}, status_code=401)
-            return await call_next(request)
-
-    app.add_middleware(BearerGuard)
-    sys.stderr.write(f"convertx-filebridge: http://{MCP_HOST}:{MCP_PORT}/mcp"
-                     f"{' (bearer required)' if MCP_TOKEN else ''}\n")
+    modes = [m for m, on in (("bearer", MCP_TOKEN), ("oauth", oauth)) if on] or ["OPEN"]
+    sys.stderr.write(f"convertx-filebridge: http://{MCP_HOST}:{MCP_PORT}/mcp  auth={'+'.join(modes)}\n")
     uvicorn.run(app, host=MCP_HOST, port=MCP_PORT, log_level="info")
 
 
