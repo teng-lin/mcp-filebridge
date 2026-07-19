@@ -72,6 +72,38 @@ services:
       minio: { condition: service_started }
       convertx: { condition: service_started }
 
+  # --- Second MCP server co-deployed on this stack: markdownify (TS backend behind
+  # the Python OAuth gateway). Shares this stack's MinIO (bucket "markdownify") and
+  # the SAME Cloudflare tunnel — reusing the S3 creds + OAuth password from this .env.
+  # Bring up without touching ConvertX:  docker compose up -d --build markdownify-gateway
+  # Then add a tunnel Public Hostname:    markdownify.hantekllc.com -> http://markdownify-gateway:8090
+  markdownify-gateway:
+    profiles: ["markdownify"]
+    build:
+      context: ../..
+      dockerfile: examples/markdownify/Dockerfile
+    image: markdownify-filebridge:local
+    restart: unless-stopped
+    environment:
+      S3_ENDPOINT: http://minio:9000                                   # internal (shared MinIO)
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-https://s3.hantekllc.com}  # presign host (client-facing)
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-spikekey}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-spikesecret}
+      S3_BUCKET: markdownify                                           # its own bucket on the shared MinIO
+      PUBLIC_BASE_URL: ${MARKDOWNIFY_BASE_URL:-https://markdownify.hantekllc.com}
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}                          # reused
+      MCP_OAUTH_PASSWORD: ${MCP_OAUTH_PASSWORD:-}                      # reused (same /login password)
+      MCP_OAUTH_BASE_URL: ${MARKDOWNIFY_BASE_URL:-https://markdownify.hantekllc.com}
+      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}                    # reused static client
+      MCP_OAUTH_CLIENT_SECRET: ${MCP_OAUTH_CLIENT_SECRET:-}
+      MCP_OAUTH_ALLOW_DCR: ${MCP_OAUTH_ALLOW_DCR:-}
+      MCP_OAUTH_TRUST_PROXY: "1"
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8090"
+    volumes: ["mdfy-oauth:/data"]        # its own OAuth state (a full-account secret)
+    depends_on:
+      minio: { condition: service_started }
+
   # --- Optional: expose the MCP server to claude.ai over HTTPS (needs a CF tunnel) --
   cloudflared:
     profiles: ["cloudflare"]
@@ -87,3 +119,4 @@ volumes:
   minio-data:
   convertx-data:
   oauth-state:
+  mdfy-oauth:

@@ -25,8 +25,9 @@ export class ShortLinkStore {
 }
 
 export class S3FileHelper {
-  constructor(s3, bucket, widgetBaseUrl, { uploadTtl = 300, downloadTtl = 900, links } = {}) {
-    this.s3 = s3; this.bucket = bucket; this.base = widgetBaseUrl.replace(/\/+$/, "");
+  constructor(s3, bucket, widgetBaseUrl, { uploadTtl = 300, downloadTtl = 900, links, presignS3 } = {}) {
+    this.s3 = s3; this.presign = presignS3 ?? s3;   // presign against the PUBLIC endpoint; internal ops use s3
+    this.bucket = bucket; this.base = widgetBaseUrl.replace(/\/+$/, "");
     this.upTtl = uploadTtl; this.dlTtl = downloadTtl; this.links = links ?? new ShortLinkStore();
   }
   #shortlink(target) { return `${this.base}/u/${this.links.put(target)}`; }
@@ -34,7 +35,7 @@ export class S3FileHelper {
   async offerUpload({ filename, keyPrefix = "src", mime = null }) {
     const key = `${keyPrefix}/${randomUUID()}/${filename}`;
     const cmd = new PutObjectCommand({ Bucket: this.bucket, Key: key, ...(mime ? { ContentType: mime } : {}) });
-    const put = await getSignedUrl(this.s3, cmd, { expiresIn: this.upTtl });
+    const put = await getSignedUrl(this.presign, cmd, { expiresIn: this.upTtl });
     return {
       status: "upload_required",
       src_key: key,
@@ -56,7 +57,7 @@ export class S3FileHelper {
   }
 
   async offerDownload({ key, filename, mime }) {
-    const url = await getSignedUrl(this.s3, new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+    const url = await getSignedUrl(this.presign, new GetObjectCommand({ Bucket: this.bucket, Key: key }),
       { expiresIn: this.dlTtl });
     return { status: "download_ready", filename, mime_type: mime, url, expires_in_seconds: this.dlTtl };
   }
@@ -77,6 +78,14 @@ if (import.meta.filename === process.argv[1]) await (async () => {
     responseChecksumValidation: "WHEN_REQUIRED",
   });
   const h = new S3FileHelper(s3, "s3fb-spike", "https://mcp.example.test");
+
+  // presignS3 seam (offline check): presigned host must follow the PUBLIC endpoint,
+  // not the internal one — else remote hosts (claude.ai) get an unreachable URL.
+  const pub = new S3Client({ ...s3.config, endpoint: "https://s3.public.test", region: "us-east-1", forcePathStyle: true,
+    credentials: { accessKeyId: "spikekey", secretAccessKey: "spikesecret" } });
+  const seam = await new S3FileHelper(s3, "s3fb-spike", "https://mcp.example.test", { presignS3: pub }).offerUpload({ filename: "x.txt" });
+  const seamHost = new URL(seam.agent_upload.url).host;
+  if (seamHost !== "s3.public.test") throw new Error(`presignS3 seam broken: presigned against ${seamHost}, expected s3.public.test`);
 
   const offer = await h.offerUpload({ filename: "spike.txt" });
 
