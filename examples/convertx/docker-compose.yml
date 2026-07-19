@@ -100,6 +100,10 @@ services:
       MCP_OAUTH_TRUST_PROXY: "1"
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8090"
+    # Published so a HOST-run cloudflared (tunnel connector not on convertx_default)
+    # can reach it at http://localhost:8090. If your connector IS on convertx_default,
+    # drop this and route to http://markdownify-gateway:8090 instead.
+    ports: ["8090:8090"]
     volumes: ["mdfy-oauth:/data"]        # its own OAuth state (a full-account secret)
     depends_on:
       minio: { condition: service_started }
