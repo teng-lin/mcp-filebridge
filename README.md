@@ -72,6 +72,21 @@ cd ts && npm install && cd ..
 python3 verify_parity.py     # asserts Python and TS emit byte-identical offers
 ```
 
+Test suite (`pytest`):
+
+```bash
+pip install -r tests/requirements-dev.txt -r examples/convertx/requirements.txt
+pytest                # unit + in-process OAuth integration (no containers needed)
+pytest -m integration # +S3 round-trip vs live MinIO; ConvertX round-trip if reachable
+```
+
+Unit tests cover the offer/widget/short-link logic, `await_upload`, and the OAuth
+pieces (config validation, SSRF guard, CIMD document validation, bearer, auth
+composition, static-client/DCR wiring). Integration tests drive the **full OAuth
+dances** — static client *and* CIMD — end to end in-process via `TestClient`
+(authorize → login → token → authenticated `/mcp`), and round-trip a file through
+real MinIO. The ConvertX conversion test is internal-only (run it via `make smoke`).
+
 The ConvertX example is a self-contained Docker Compose stack (MCP server + ConvertX + MinIO):
 
 ```bash

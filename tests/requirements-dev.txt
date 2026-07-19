@@ -1,0 +1,3 @@
+# Test deps (plus the runtime deps in examples/convertx/requirements.txt).
+pytest>=8
+httpx>=0.27
