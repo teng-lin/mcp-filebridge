@@ -21,11 +21,11 @@ If you only need Python and don't want a bucket, use `mcp_filebridge`. If you ne
 ## What's here
 
 ```
-s3_filebridge.py        # the Python helper: offer_upload / offer_download / await_upload / routes / set_bucket_cors
-ts-twin/s3_filebridge.mjs  # the TypeScript twin (@aws-sdk) — same offer JSON + widget, verbatim
-verify_parity.py        # golden-vector test: proves Python & TS emit byte-identical offers
-offer.golden.json       # the normalized offer contract (checked in)
-examples/convertx_mcp.py   # wraps the ConvertX converter behind an MCP server using the helper
+python/s3_filebridge.py   # the Python helper: offer_upload / offer_download / await_upload / routes / set_bucket_cors
+ts/s3_filebridge.mjs      # the TypeScript twin (@aws-sdk) — same offer JSON + widget, verbatim
+verify_parity.py          # golden-vector test: proves Python & TS emit byte-identical offers
+offer.golden.json         # the normalized offer contract (checked in)
+examples/convertx_mcp.py  # wraps the ConvertX converter behind an MCP server using the helper
 ```
 
 ## The offer contract
@@ -62,13 +62,13 @@ Python helper self-check:
 
 ```bash
 pip install boto3 requests starlette
-python3 s3_filebridge.py
+python3 python/s3_filebridge.py
 ```
 
 Cross-language parity (needs Node + MinIO):
 
 ```bash
-cd ts-twin && npm install && cd ..
+cd ts && npm install && cd ..
 python3 verify_parity.py     # asserts Python and TS emit byte-identical offers
 ```
 

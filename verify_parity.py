@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent / "python"))
 import s3_filebridge as fb  # the Python helper
 import boto3
 from botocore.client import Config
@@ -64,7 +64,7 @@ golden = normalize(py_offer)
 (HERE / "offer.golden.json").write_text(json.dumps(golden, indent=2, sort_keys=True))
 
 # --- TS offer (run the Node twin, read its JSON) --------------------------- #
-proc = subprocess.run(["node", "s3_filebridge.mjs"], cwd=HERE / "ts-twin",
+proc = subprocess.run(["node", "s3_filebridge.mjs"], cwd=HERE / "ts",
                       capture_output=True, text=True)
 if proc.returncode != 0:
     sys.exit(f"TS twin failed:\n{proc.stderr}")
