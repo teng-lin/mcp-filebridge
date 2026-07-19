@@ -57,7 +57,7 @@ _WIDGET_HTML = """<!doctype html>
  const log=m=>{out.textContent+=(out.textContent?"\\n":"")+m;size();};
  const post=m=>{try{window.parent.postMessage(m,"*")}catch(e){}};
  const oai=window.openai;
- let initialized=false, uploadUrl=null;
+ let initialized=false, uploadUrl=null, srcKey=null, target=null;
  const geturl=o=>o&&o.upload_url||null;
  function size(){post({jsonrpc:"2.0",method:"ui/notifications/size-changed",
    params:{height:document.documentElement.scrollHeight,width:document.documentElement.scrollWidth}});}
@@ -73,7 +73,7 @@ _WIDGET_HTML = """<!doctype html>
      try{const j=JSON.parse(c.text);if(geturl(j))d=j}catch(e){}}
    if(!geturl(d)&&geturl(p))d=p;
    const u=geturl(d);
-   if(u&&!uploadUrl){uploadUrl=u;fi.disabled=false;sub.textContent="pick the file to upload";}
+   if(u&&!uploadUrl){uploadUrl=u;srcKey=d.src_key;target=d.target;fi.disabled=false;sub.textContent="pick the file to upload";}
  }
  // claude.ai: tool result via postMessage. We don't allowlist ev.origin: the only thing a message
  // can set is uploadUrl, and the CSP connect-src pins uploads to the bucket + the presigned URL is a
@@ -94,8 +94,22 @@ _WIDGET_HTML = """<!doctype html>
    btn.disabled=true; fi.disabled=true; log("uploading "+file.name+" ("+file.size+" B)…");
    try{
      const res=await fetch(uploadUrl,{method:"PUT",body:file});   // direct PUT to the S3 presigned URL
-     if(res.ok){sub.textContent="✅ uploaded — ask me to convert it";log("done ✓");}
-     else{log("["+res.status+"] upload failed");btn.disabled=false;fi.disabled=false;}
+     if(!res.ok){log("["+res.status+"] upload failed");btn.disabled=false;fi.disabled=false;return;}
+     log("uploaded ✓");
+     // Auto-convert: if the host lets the widget call tools (ChatGPT), fire convert now
+     // so the user needs no second command. claude.ai lacks this → the model chains convert.
+     if(oai&&typeof oai.callTool==="function"&&srcKey){
+       sub.textContent="converting…";
+       try{
+         const r=await oai.callTool("convert",{src_key:srcKey,target:target||""});
+         const o=(r&&(r.structuredContent||r.toolResult||r))||{};
+         sub.textContent="✅ converted";
+         if(o.url){const a=document.createElement("a");a.href=o.url;a.target="_blank";
+           a.textContent="⬇ Download "+(o.filename||"result");
+           a.style.cssText="display:block;margin-top:10px;font-weight:600;color:#2f6df7";
+           document.querySelector(".card").appendChild(a);size();}
+       }catch(e){sub.textContent="✅ uploaded — ask me to convert it";log("auto-convert unavailable: "+e);}
+     } else { sub.textContent="✅ uploaded — ask me to convert it"; }
    }catch(e){log("❌ upload failed (CSP/CORS/network): "+e);btn.disabled=false;fi.disabled=false;}
  });
 </script></body></html>"""
@@ -139,9 +153,11 @@ def register_upload_widget(mcp: FastMCP, files, s3_public_endpoint: str, public_
         """STEP 1 of converting a file: get the source file from the user. Shows an inline
         file picker (or, if the host can't render it, surface `upload_link` to the user).
         `filename` is the source file's name WITH extension (e.g. "MyBook.epub", "report.docx")
-        — it sets both the input type and the output name (MyBook.epub → MyBook.mobi). Once
-        the user has uploaded, call `convert(src_key, target)` — do NOT ask them to paste the
-        file, and do NOT pass a tool (convert picks the right converter automatically).
+        — it sets both the input type and the output name (MyBook.epub → MyBook.mobi).
+        IMMEDIATELY after calling this, call `convert(src_key, target)` in the SAME turn — do
+        NOT wait for another user message and do NOT ask the user to confirm. convert BLOCKS
+        until the user finishes uploading and then converts automatically, so the user only
+        has to pick the file. Do NOT ask them to paste the file, and do NOT pass a tool.
         Returns `src_key` (pass to convert), `upload_url` (the widget uses it), and
         `upload_link` (a click-to-upload fallback for the user)."""
         offer = mint_upload(filename)

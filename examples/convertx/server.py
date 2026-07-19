@@ -150,15 +150,21 @@ def _mint_upload(filename: str) -> dict:
     return files.offer_upload(filename=safe)
 
 
-def _wait_for_key(key: str, timeout: int = 90) -> None:
-    """Poll until the object lands (the widget/agent upload may still be in flight)."""
-    for _ in range(timeout):
+# Block this long for the upload to land (like notebooklm-py's await_upload).
+# Kept under typical host tool-call timeouts so the single convert() call returns.
+_UPLOAD_WAIT_SECONDS = 55
+
+
+def _wait_for_key(key: str, timeout: int = _UPLOAD_WAIT_SECONDS) -> bool:
+    """Block until the object lands (the widget/agent upload may still be in flight).
+    Returns True if it landed, False on timeout (caller decides how to report)."""
+    for _ in range(timeout * 2):
         try:
             s3.head_object(Bucket=BUCKET, Key=key)
-            return
+            return True
         except Exception:
-            time.sleep(1)
-    raise RuntimeError(f"source not uploaded yet: {key}")
+            time.sleep(0.5)
+    return False
 
 
 _MIN_RESULT_BYTES = 64  # ConvertX error text ("Something went wrong") is ~21 bytes
@@ -167,10 +173,17 @@ _MIN_RESULT_BYTES = 64  # ConvertX error text ("Something went wrong") is ~21 by
 def convert(src_key: str, target: str, tool: str = "auto") -> dict:
     """Convert the file the user uploaded via `upload_file` (identified by `src_key`) to
     `target` (e.g. "pdf", "docx", "mobi"). The right converter is chosen automatically —
-    do NOT guess a `tool`. Waits for the upload to finish, runs the conversion, and
-    returns a download link. This is STEP 2 — call `upload_file` first."""
+    do NOT guess a `tool`.
+
+    Call this IMMEDIATELY after `upload_file` — do NOT wait for another user message. It
+    BLOCKS until the user finishes uploading (up to ~55s) and then converts automatically,
+    so the user only has to pick the file. If it reports the upload hasn't arrived yet,
+    the user is still picking — just call convert again."""
     _ensure_bucket()
-    _wait_for_key(src_key)  # the widget upload may not have finished when the model calls convert
+    if not _wait_for_key(src_key):  # blocks like await_upload; the upload may still be in flight
+        raise RuntimeError(
+            f"The upload for '{src_key.split('/')[-1]}' hasn't arrived yet — the user is likely "
+            f"still choosing the file. Call convert again once they've uploaded.")
     data = s3.get_object(Bucket=BUCKET, Key=src_key)["Body"].read()
     filename = src_key.split("/")[-1]
     source_ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
