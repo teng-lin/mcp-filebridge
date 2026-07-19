@@ -170,6 +170,13 @@ def test_open_dcr_when_no_static_client():
     assert prov.client_registration_options.enabled is True
 
 
+def test_allow_dcr_keeps_registration_open_with_static_client():
+    prov = oauth.SelfHostedOAuthProvider(
+        password=STRONG, base_url=BASE, static_client_id="cid", allow_dcr=True)
+    assert "cid" in prov.clients  # static client still pre-registered
+    assert prov.client_registration_options.enabled is True  # DCR fallback on
+
+
 def test_unknown_client_returns_none():
     prov = oauth.SelfHostedOAuthProvider(password=STRONG, base_url=BASE)
     assert asyncio.run(prov.get_client("does-not-exist")) is None

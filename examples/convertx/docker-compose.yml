@@ -61,6 +61,7 @@ services:
       # connector "Advanced settings". Unset both to fall back to open DCR.
       MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}
       MCP_OAUTH_CLIENT_SECRET: ${MCP_OAUTH_CLIENT_SECRET:-}
+      MCP_OAUTH_ALLOW_DCR: ${MCP_OAUTH_ALLOW_DCR:-}   # keep RFC 7591 as a fallback for ChatGPT
       MCP_OAUTH_STATE_PATH: /data/oauth_state.json   # survives redeploys (volume below)
       MCP_OAUTH_TRUST_PROXY: "1"                      # behind Cloudflare: trust CF-Connecting-IP for the login throttle
       MCP_HOST: "0.0.0.0"

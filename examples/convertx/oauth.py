@@ -60,6 +60,10 @@ STATE_PATH_ENV = "MCP_OAUTH_STATE_PATH"
 CLIENT_ID_ENV = "MCP_OAUTH_CLIENT_ID"
 CLIENT_SECRET_ENV = "MCP_OAUTH_CLIENT_SECRET"
 REDIRECT_URIS_ENV = "MCP_OAUTH_REDIRECT_URIS"  # comma-separated; exact-matched
+# Keep open DCR (RFC 7591) enabled AS A FALLBACK even when a static client is set.
+# ChatGPT needs a usable CIMD *or* RFC 7591 path; if its CIMD probe is finicky, the
+# registration_endpoint gives it a working fallback. Still password-gated + capped.
+ALLOW_DCR_ENV = "MCP_OAUTH_ALLOW_DCR"
 # Claude.ai's fixed connector callback (exact-match required).
 DEFAULT_REDIRECT_URIS = ("https://claude.ai/api/mcp/auth_callback",)
 
@@ -174,6 +178,7 @@ class OAuthConfig:
     client_id: str | None = None
     client_secret: str | None = field(default=None, repr=False)
     redirect_uris: tuple[str, ...] = ()
+    allow_dcr: bool = False
 
 
 def get_oauth_config() -> OAuthConfig | None:
@@ -199,7 +204,8 @@ def get_oauth_config() -> OAuthConfig | None:
                        trust_proxy=os.environ.get(TRUST_PROXY_ENV) == "1",
                        client_id=client_id,
                        client_secret=(os.environ.get(CLIENT_SECRET_ENV) or "").strip() or None,
-                       redirect_uris=tuple(ruris) or (DEFAULT_REDIRECT_URIS if client_id else ()))
+                       redirect_uris=tuple(ruris) or (DEFAULT_REDIRECT_URIS if client_id else ()),
+                       allow_dcr=os.environ.get(ALLOW_DCR_ENV) == "1")
 
 
 def _client_ip(request: Request, *, trust_proxy: bool) -> str:
@@ -215,12 +221,14 @@ class SelfHostedOAuthProvider(InMemoryOAuthProvider):
     file-backed persistence of clients + tokens."""
 
     def __init__(self, password, base_url, state_path=None, trust_proxy=False,
-                 static_client_id=None, static_client_secret=None, redirect_uris=()) -> None:
-        # Static client ID → disable open DCR (close the /register write surface);
-        # the one client is pre-registered below. No static id → open DCR (legacy).
+                 static_client_id=None, static_client_secret=None, redirect_uris=(),
+                 allow_dcr=False) -> None:
+        # Static client ID → close open DCR (its /register is an unauthenticated write
+        # surface). allow_dcr forces DCR back on as a fallback (ChatGPT) even with a
+        # static client. No static id → open DCR (legacy).
+        dcr_enabled = static_client_id is None or allow_dcr
         super().__init__(base_url=base_url,
-                         client_registration_options=ClientRegistrationOptions(
-                             enabled=static_client_id is None))
+                         client_registration_options=ClientRegistrationOptions(enabled=dcr_enabled))
         self.__salt = secrets.token_bytes(16)
         self.__pw_digest = self._kdf(password)
         self._kdf_limiter = anyio.CapacityLimiter(4)
@@ -473,4 +481,5 @@ def build_oauth_provider(config: OAuthConfig) -> AuthProvider:
                                    state_path=config.state_path, trust_proxy=config.trust_proxy,
                                    static_client_id=config.client_id,
                                    static_client_secret=config.client_secret,
-                                   redirect_uris=config.redirect_uris)
+                                   redirect_uris=config.redirect_uris,
+                                   allow_dcr=config.allow_dcr)
