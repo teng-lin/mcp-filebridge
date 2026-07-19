@@ -112,13 +112,19 @@ def register_upload_widget(mcp: FastMCP, files, s3_public_endpoint: str, public_
         return
 
     origin = s3_public_endpoint.rstrip("/")
+    # The widget only fetches the S3 bucket, but include the connector origin too
+    # (as notebooklm-py does) in case the host's iframe init expects its own origin
+    # in connect-src. Order: connector origin first, then the bucket.
+    connect = [public_base_url.rstrip("/"), origin]
+    if origin == public_base_url.rstrip("/"):
+        connect = [origin]
 
     @mcp.resource(
         _WIDGET_URI,
-        meta={"openai/widgetCSP": {"connect_domains": [origin], "resource_domains": []}},
+        meta={"openai/widgetCSP": {"connect_domains": connect, "resource_domains": []}},
         app=AppConfig(
             domain=_widget_domain(public_base_url),           # claude.ai render gate
-            csp=ResourceCSP(connect_domains=[origin]),        # widget → S3 bucket
+            csp=ResourceCSP(connect_domains=connect),         # widget → S3 bucket (+ connector origin)
             prefers_border=True,
         ),
     )

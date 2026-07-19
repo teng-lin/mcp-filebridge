@@ -163,11 +163,31 @@ def convert(src_key: str, target: str, tool: str = "pandoc") -> dict:
     return files.offer_download(key=out_key, filename=result.filename, mime=_MIME)
 
 
+class _LogMiddleware:
+    """Log the MCP calls claude.ai/ChatGPT make, to diagnose widget rendering."""
+    async def on_list_tools(self, context, call_next):
+        sys.stderr.write("[mcp] list_tools\n"); sys.stderr.flush()
+        return await call_next(context)
+
+    async def on_list_resources(self, context, call_next):
+        sys.stderr.write("[mcp] list_resources\n"); sys.stderr.flush()
+        return await call_next(context)
+
+    async def on_call_tool(self, context, call_next):
+        sys.stderr.write(f"[mcp] call_tool {getattr(context.message, 'name', '?')}\n"); sys.stderr.flush()
+        return await call_next(context)
+
+    async def on_read_resource(self, context, call_next):
+        sys.stderr.write(f"[mcp] read_resource {getattr(context.message, 'uri', '?')}\n"); sys.stderr.flush()
+        return await call_next(context)
+
+
 def build_server(auth=None):
     from fastmcp import FastMCP
 
     from widget import register_upload_widget
     mcp = FastMCP(name="convertx-filebridge", auth=auth)
+    mcp.add_middleware(_LogMiddleware())
     mcp.tool(request_upload)   # link fallback (portable)
     mcp.tool(list_conversions)
     mcp.tool(convert)
