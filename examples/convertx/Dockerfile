@@ -14,6 +14,11 @@ COPY examples/convertx/server.py /app/examples/convertx/server.py
 COPY examples/convertx/oauth.py /app/examples/convertx/oauth.py
 COPY examples/convertx/widget.py /app/examples/convertx/widget.py
 
+# Create the OAuth-state mount point owned by the runtime user, so a fresh named
+# volume mounted at /data inherits app ownership (Docker seeds an empty volume from
+# the image path) — otherwise it lands root-owned and state can't persist.
+RUN mkdir -p /data && chown 10001:10001 /data
+
 USER app
 ENV MCP_HOST=0.0.0.0 MCP_PORT=9400
 EXPOSE 9400
