@@ -1,21 +1,21 @@
-# markdownify gateway stack: Python OAuth gateway (proxying the TS backend) + MinIO.
-#   cp .env.example .env   # set MCP_BEARER_TOKEN (+ OAuth for claude.ai)
+# Self-contained markdownify stack — independent of the ConvertX stack.
+# Own MinIO + OAuth gateway (TS backend) + dedicated Cloudflare tunnel, all on this
+# project's own network (markdownify_default). Nothing shared with ConvertX.
+#   cp .env.example .env   # set MCP_BEARER_TOKEN + OAuth + APPS_CF_TUNNEL_TOKEN
 #   docker compose up -d --build
-# Ports differ from the ConvertX stack so both can run side by side.
+# Dashboard routes for the dedicated tunnel:
+#   s3-markdownify.hantekllc.com -> http://minio:9000
+#   markdownify.hantekllc.com    -> http://gateway:8090
 services:
-  # Bundled bucket for STANDALONE LOCAL DEV only: `docker compose --profile local up`.
-  # In prod, omit this and point S3_ENDPOINT/S3_PUBLIC_ENDPOINT at your shared bucket
-  # (e.g. https://s3.hantekllc.com — same MinIO/R2 the ConvertX stack uses, bucket=markdownify).
   minio:
-    profiles: ["local"]
     image: quay.io/minio/minio:latest
     command: server /data
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-spikekey}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-spikesecret}
-      MINIO_API_CORS_ALLOW_ORIGIN: "*"
-    ports: ["9101:9000"]           # host:container (9101 to avoid the ConvertX stack's 9100)
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"   # MinIO sets CORS here (no PutBucketCors API)
+    ports: ["${MINIO_HOST_PORT:-9101}:9000"]   # host publish (dev/debug; the tunnel uses docker-DNS)
     volumes: ["mdfy-minio:/data"]
 
   gateway:
@@ -25,34 +25,35 @@ services:
     image: markdownify-filebridge:local
     restart: unless-stopped
     environment:
-      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}                   # gateway/backend -> bucket (internal or shared public)
-      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9101}  # client -> bucket (presign host)
+      S3_ENDPOINT: http://minio:9000                                   # internal (own MinIO)
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-https://s3-markdownify.hantekllc.com}  # presign host
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-spikekey}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-spikesecret}
       S3_BUCKET: ${S3_BUCKET:-markdownify}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8090}        # gateway's public URL (/u widget + OAuth base)
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://markdownify.hantekllc.com}
       MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}
       MCP_OAUTH_PASSWORD: ${MCP_OAUTH_PASSWORD:-}
-      MCP_OAUTH_BASE_URL: ${MCP_OAUTH_BASE_URL:-}
+      MCP_OAUTH_BASE_URL: ${MCP_OAUTH_BASE_URL:-https://markdownify.hantekllc.com}
       MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}
       MCP_OAUTH_CLIENT_SECRET: ${MCP_OAUTH_CLIENT_SECRET:-}
       MCP_OAUTH_ALLOW_DCR: ${MCP_OAUTH_ALLOW_DCR:-}
       MCP_OAUTH_TRUST_PROXY: "1"
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8090"
-    ports: ["${MCP_HOST_PORT:-8090}:8090"]
+    ports: ["${MCP_HOST_PORT:-8090}:8090"]     # host publish (dev/debug; the tunnel uses docker-DNS)
     volumes: ["mdfy-oauth:/data"]  # OAuth state (a full-account secret)
     depends_on:
       minio: { condition: service_started }
 
-  # Optional: expose to claude.ai/ChatGPT via a Cloudflare tunnel (route a hostname → gateway:8090).
+  # Dedicated Cloudflare tunnel connector. On this stack's own network, so it resolves
+  # minio + gateway by docker-DNS. http2 because QUIC/UDP 7844 egress is blocked here.
   cloudflared:
-    profiles: ["cloudflare"]
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     command: tunnel run
     environment:
-      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
+      TUNNEL_TOKEN: ${APPS_CF_TUNNEL_TOKEN:-}
+      TUNNEL_TRANSPORT_PROTOCOL: http2
     depends_on:
       gateway: { condition: service_healthy }
 

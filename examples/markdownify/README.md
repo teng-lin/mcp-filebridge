@@ -30,10 +30,23 @@ docker cp report.docx markdownify-gateway-1:/tmp/report.docx
 docker compose exec gateway python - < smoke.py   # see README history / the session for the snippet
 ```
 
-Ports differ from the ConvertX stack (MinIO on `9101`, gateway on `8090`) so both run side by side.
+This is a **self-contained** stack — its own MinIO, gateway, and a dedicated Cloudflare
+tunnel on its own `markdownify_default` network. It shares nothing with the ConvertX stack
+(ports 9101/8090 differ so both can run on one host).
 
 ## Connect from claude.ai / ChatGPT
-Same as `examples/convertx`: route a tunnel hostname → `gateway:8090`, set `PUBLIC_BASE_URL`/`MCP_OAUTH_BASE_URL` to it, add the connector, enter the password at `/login`. Point the bucket at R2/S3 (public) for real use.
+The `cloudflared` service runs a dedicated tunnel (`APPS_CF_TUNNEL_TOKEN`, forced to
+`http2`). Give that tunnel two Public Hostnames in the Cloudflare dashboard — both resolve
+by docker-DNS because the connector is on this stack's network:
+
+| Hostname | Service |
+|---|---|
+| `s3-markdownify.<domain>` | `http://minio:9000` (presigned upload/download target) |
+| `markdownify.<domain>` | `http://gateway:8090` (the MCP endpoint) |
+
+Set `S3_PUBLIC_ENDPOINT`/`PUBLIC_BASE_URL`/`MCP_OAUTH_BASE_URL` to those hostnames, add the
+connector at `https://markdownify.<domain>/mcp`, and enter the password at `/login`. For a
+managed bucket instead of the bundled MinIO, point `S3_ENDPOINT`/`S3_PUBLIC_ENDPOINT` at R2/S3.
 
 ## Status
 - ✅ **Validated**: local (bearer gateway → TS backend → markitdown), in-container end-to-end, and the proxy hop over a live Cloudflare quick tunnel.
