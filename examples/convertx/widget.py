@@ -100,7 +100,8 @@ _WIDGET_HTML = """<!doctype html>
  // (so we can show a link). claude.ai/MCP-Apps: a tools/call postMessage (fire-and-forget → the
  // download link reaches the MODEL, which shows it in chat). Hard-allowlist CONVERT_TOOL; the args
  // are our own just-minted src_key/target, so a spoofed message can't redirect the tool or its input.
- function autoConvert(){ if(!srcKey)return null; const args={src_key:srcKey,target:target||""};
+ function autoConvert(fname){ if(!srcKey)return null;
+   const args={src_key:srcKey,target:target||"",filename:fname||""};  // pass the REAL picked name → output keeps its stem
    if(oai&&typeof oai.callTool==="function"){try{return oai.callTool(CONVERT_TOOL,args);}catch(e){return null;}}
    post({jsonrpc:"2.0",id:"cv"+(++cvSeq),method:"tools/call",params:{name:CONVERT_TOOL,arguments:args}}); return null;}
  fi.addEventListener('change',()=>{btn.disabled=!(fi.files&&fi.files.length);});
@@ -113,7 +114,7 @@ _WIDGET_HTML = """<!doctype html>
      pg.style.display="none";
      if(!res.ok){log("["+res.status+"] upload failed");btn.disabled=false;fi.disabled=false;return;}
      log("uploaded ✓");
-     const p=autoConvert();
+     const p=autoConvert(file.name);   // the real filename the user picked → output keeps its stem
      if(p){ sub.textContent="converting…";   // ChatGPT: result comes back → show a download link
        try{ const r=await p; const o=(r&&(r.structuredContent||r.toolResult||r))||{};
          sub.textContent="✅ converted";

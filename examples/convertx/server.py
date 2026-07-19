@@ -170,10 +170,12 @@ def _wait_for_key(key: str, timeout: int = _UPLOAD_WAIT_SECONDS) -> bool:
 _MIN_RESULT_BYTES = 64  # ConvertX error text ("Something went wrong") is ~21 bytes
 
 
-def convert(src_key: str, target: str, tool: str = "auto") -> dict:
+def convert(src_key: str, target: str, tool: str = "auto", filename: str = "") -> dict:
     """Convert the file the user uploaded via `upload_file` (identified by `src_key`) to
     `target` (e.g. "pdf", "docx", "mobi"). The right converter is chosen automatically —
-    do NOT guess a `tool`.
+    do NOT guess a `tool`. `filename` is the real source filename (the widget passes it);
+    it sets the output name so MyBook.epub → MyBook.mobi. Leave it empty and the name is
+    taken from the upload key.
 
     Call this IMMEDIATELY after `upload_file` — do NOT wait for another user message. It
     BLOCKS until the user finishes uploading (up to ~55s) and then converts automatically,
@@ -185,13 +187,15 @@ def convert(src_key: str, target: str, tool: str = "auto") -> dict:
             f"The upload for '{src_key.split('/')[-1]}' hasn't arrived yet — the user is likely "
             f"still choosing the file. Call convert again once they've uploaded.")
     data = s3.get_object(Bucket=BUCKET, Key=src_key)["Body"].read()
-    filename = src_key.split("/")[-1]
-    source_ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+    # The widget knows the file the user actually picked; prefer that name (so the output
+    # keeps the real stem) over the key's name, which was minted from the model's guess.
+    name = os.path.basename(filename.strip()) or src_key.split("/")[-1]
+    source_ext = name.rsplit(".", 1)[-1].lower() if "." in name else "bin"
     # Smart tool selection: ask ConvertX which converter handles source_ext → target.
     # Raises a helpful "supported targets: …" error for an unsupported pair.
     if not tool or tool == "auto":
         tool = cx.pick_tool(source_ext, target)
-    result = cx.convert(filename, data, target, tool)
+    result = cx.convert(name, data, target, tool)
     # A failed conversion still yields a downloadable stub (ConvertX's error text) —
     # don't pass that off as the result. Fail loudly with what went wrong.
     if len(result.content) < _MIN_RESULT_BYTES:

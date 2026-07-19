@@ -64,6 +64,8 @@ def test_widget_auto_convert_both_hosts_with_allowlist():
     assert "callTool(CONVERT_TOOL" in html              # ChatGPT path
     assert 'method:"tools/call"' in html                # claude.ai postMessage path
     assert 'CONVERT_TOOL="convert"' in html             # hard allowlist (anti-spoof)
+    assert "autoConvert(file.name)" in html             # passes the REAL picked name → output keeps its stem
+    assert "filename:fname" in html
 
 
 # --- registration ---------------------------------------------------------- #
