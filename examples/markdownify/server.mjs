@@ -103,10 +103,13 @@ btn.addEventListener('click',()=>{const file=fi.files&&fi.files[0];if(!file||!co
  x.setRequestHeader("Content-Type",file.type||"application/octet-stream");
  x.upload.onprogress=e=>{if(e.lengthComputable){pg.value=Math.round(e.loaded/e.total*100);sub.textContent="uploading "+pg.value+"% — converting on the server…";}};
  x.onload=()=>{pg.style.display="none";
-  if(x.status>=200&&x.status<300){let md="";try{md=JSON.parse(x.responseText).markdown||""}catch(e){md=x.responseText;}
+  if(x.status>=200&&x.status<300){let j={};try{j=JSON.parse(x.responseText)}catch(e){}
+   const md=(j.markdown!==undefined)?j.markdown:x.responseText;
    mdEl.value=md;mdEl.style.display="block";actions.style.display="block";
    sub.textContent="✅ converted "+file.name+" ("+md.length+" chars)";
-   const blob=new Blob([md],{type:"text/markdown"});$('dl').href=URL.createObjectURL(blob);$('dl').download=file.name.replace(/\\.[^.]+$/,"")+".md";
+   const dl=$('dl');
+   if(j.download_url){dl.href=j.download_url;dl.removeAttribute("download");dl.textContent="⬇ Download .md (opens in browser)";dl.style.display="";}
+   else{dl.style.display="none";}   // no server URL → Copy only (a blob download is blocked in the sandbox)
    size();}
   else{sub.textContent="conversion failed";out.textContent="["+x.status+"] "+x.responseText.slice(0,240);btn.disabled=false;fi.disabled=false;}};
  x.onerror=()=>{pg.style.display="none";sub.textContent="";out.textContent="❌ network/CORS error reaching the server";btn.disabled=false;fi.disabled=false;};

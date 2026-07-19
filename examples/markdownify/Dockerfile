@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # is the light set — the office/PDF formats ConvertX can't do to markdown. Add [all] for
 # audio transcription + image OCR (heavy).
 RUN python3 -m venv /venv \
- && /venv/bin/pip install --no-cache-dir fastmcp==3.4.2 uvicorn "markitdown[pdf,docx,pptx,xlsx]" anyio requests
+ && /venv/bin/pip install --no-cache-dir fastmcp==3.4.2 uvicorn "markitdown[pdf,docx,pptx,xlsx]" anyio requests boto3
 ENV PATH=/venv/bin:$PATH MARKITDOWN_BIN=markitdown
 
 WORKDIR /app

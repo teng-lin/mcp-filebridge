@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import sys
 import tempfile
 import time
@@ -73,6 +74,35 @@ def _valid_ticket(token: str) -> bool:
         return False
 
 
+_S3_BUCKET = os.environ.get("S3_BUCKET", "markdownify")
+
+
+def _store_markdown(md: str, stem: str) -> str | None:
+    """PUT the .md to S3 (internal endpoint) and return a presigned GET URL against the PUBLIC
+    endpoint (browser-reachable), with an attachment disposition so the link downloads. Returns
+    None if S3 isn't reachable — the widget then falls back to Copy-only."""
+    try:
+        import boto3  # lazy: keeps the gateway importable without boto3
+        from botocore.config import Config
+
+        cfg = Config(signature_version="s3v4", s3={"addressing_style": "path"})
+        creds = dict(aws_access_key_id=os.environ.get("S3_ACCESS_KEY"),
+                     aws_secret_access_key=os.environ.get("S3_SECRET_KEY"), region_name="us-east-1", config=cfg)
+        internal = boto3.client("s3", endpoint_url=os.environ.get("S3_ENDPOINT", "http://minio:9000"), **creds)
+        public = boto3.client("s3", endpoint_url=os.environ.get("S3_PUBLIC_ENDPOINT") or os.environ.get("S3_ENDPOINT"), **creds)
+        key = f"out/{secrets.token_hex(8)}/{stem}.md"
+        disp = f'attachment; filename="{stem}.md"'
+        internal.put_object(Bucket=_S3_BUCKET, Key=key, Body=md.encode("utf-8"), ContentType="text/markdown; charset=utf-8")
+        return public.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": _S3_BUCKET, "Key": key, "ResponseContentDisposition": disp},
+            ExpiresIn=int(os.environ.get("MD_DOWNLOAD_TTL", "86400")),
+        )
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"markdown S3 store failed (Copy-only fallback): {exc}\n")
+        return None
+
+
 async def convert_route(request: Request) -> Response:
     if request.method == "OPTIONS":
         return Response(status_code=204, headers=_CORS)
@@ -86,9 +116,9 @@ async def convert_route(request: Request) -> Response:
     if not body:
         return PlainTextResponse("empty body", status_code=400, headers=_CORS)
     filename = os.path.basename(request.query_params.get("filename", "upload.bin")) or "upload.bin"
-    ext = os.path.splitext(filename)[1] or ".bin"
+    stem, ext = os.path.splitext(filename)
     with tempfile.TemporaryDirectory() as d:
-        path = os.path.join(d, "src" + ext)
+        path = os.path.join(d, "src" + (ext or ".bin"))
         with open(path, "wb") as fh:
             fh.write(body)
         try:
@@ -97,7 +127,11 @@ async def convert_route(request: Request) -> Response:
             md = MarkItDown().convert(path).text_content
         except Exception as exc:  # noqa: BLE001 — surface the reason to the widget
             return PlainTextResponse(f"conversion failed: {exc}", status_code=500, headers=_CORS)
-    return JSONResponse({"markdown": md, "filename": filename}, headers=_CORS)
+    payload = {"markdown": md, "filename": filename}
+    download_url = _store_markdown(md, stem or "document")
+    if download_url:
+        payload["download_url"] = download_url
+    return JSONResponse(payload, headers=_CORS)
 
 
 def main():
