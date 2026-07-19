@@ -86,6 +86,7 @@ def test_metadata_advertises_cimd(monkeypatch):
         meta = client.get("/.well-known/oauth-authorization-server").json()
         assert meta["client_id_metadata_document_supported"] is True
         assert meta.get("registration_endpoint") is None  # DCR closed
+        assert "none" in meta["token_endpoint_auth_methods_supported"]  # public PKCE (ChatGPT/CIMD)
 
 
 def test_wrong_password_rejected(monkeypatch):

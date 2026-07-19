@@ -319,6 +319,12 @@ class SelfHostedOAuthProvider(InMemoryOAuthProvider):
         def _patched(*a, **k):
             m = _orig(*a, **k)
             m.client_id_metadata_document_supported = True
+            # CIMD clients (ChatGPT) are public + PKCE → advertise "none" so the
+            # client knows it may authenticate with the PKCE verifier alone.
+            methods = list(m.token_endpoint_auth_methods_supported or [])
+            if "none" not in methods:
+                methods.append("none")
+            m.token_endpoint_auth_methods_supported = methods
             return m
 
         _r.build_metadata = _patched
