@@ -63,24 +63,29 @@ export class S3FileHelper {
 }
 
 // --- main: emit an offer for parity + do a live round-trip against MinIO --- #
-const s3 = new S3Client({
-  endpoint: "http://localhost:9100", region: "us-east-1", forcePathStyle: true,
-  credentials: { accessKeyId: "spikekey", secretAccessKey: "spikesecret" },
-  // @aws-sdk v3 defaults to signing a CRC32 checksum into presigned URLs, which
-  // breaks a plain PUT (curl/browser fetch sends no matching checksum header) on
-  // real AWS S3. Match boto3's leaner presign and keep the URL usable by any client.
-  requestChecksumCalculation: "WHEN_REQUIRED",
-  responseChecksumValidation: "WHEN_REQUIRED",
-});
-const h = new S3FileHelper(s3, "s3fb-spike", "https://mcp.example.test");
+// Guarded so importing this module as a LIBRARY does not run the demo (or its
+// network calls) — it runs only when executed directly (node s3_filebridge.mjs),
+// like Python's `if __name__ == "__main__"`.
+if (import.meta.filename === process.argv[1]) await (async () => {
+  const s3 = new S3Client({
+    endpoint: "http://localhost:9100", region: "us-east-1", forcePathStyle: true,
+    credentials: { accessKeyId: "spikekey", secretAccessKey: "spikesecret" },
+    // @aws-sdk v3 defaults to signing a CRC32 checksum into presigned URLs, which
+    // breaks a plain PUT (curl/browser fetch sends no matching checksum header) on
+    // real AWS S3. Match boto3's leaner presign and keep the URL usable by any client.
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
+  });
+  const h = new S3FileHelper(s3, "s3fb-spike", "https://mcp.example.test");
 
-const offer = await h.offerUpload({ filename: "spike.txt" });
+  const offer = await h.offerUpload({ filename: "spike.txt" });
 
-// functional: PUT bytes to the TS-minted presigned URL, GET them back
-const put = await fetch(offer.agent_upload.url, { method: "PUT", body: "hello from TS agent path" });
-const dl = await h.offerDownload({ key: offer.src_key, filename: "spike.txt", mime: "text/plain" });
-const got = await fetch(dl.url);
-const body = await got.text();
-const functional = put.status === 200 && body === "hello from TS agent path" ? "ok" : `FAIL put=${put.status} body=${body}`;
+  // functional: PUT bytes to the TS-minted presigned URL, GET them back
+  const put = await fetch(offer.agent_upload.url, { method: "PUT", body: "hello from TS agent path" });
+  const dl = await h.offerDownload({ key: offer.src_key, filename: "spike.txt", mime: "text/plain" });
+  const got = await fetch(dl.url);
+  const body = await got.text();
+  const functional = put.status === 200 && body === "hello from TS agent path" ? "ok" : `FAIL put=${put.status} body=${body}`;
 
-console.log(JSON.stringify({ offer, functional, widget_has_picker: uploadPage(put.url ?? offer.agent_upload.url).includes("type=file") }));
+  console.log(JSON.stringify({ offer, functional, widget_has_picker: uploadPage(put.url ?? offer.agent_upload.url).includes("type=file") }));
+})();
