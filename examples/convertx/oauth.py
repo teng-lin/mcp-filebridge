@@ -16,10 +16,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import html
+import ipaddress
 import json
 import logging
 import os
 import secrets
+import socket
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -28,6 +30,7 @@ from typing import NamedTuple
 from urllib.parse import urlparse
 
 import anyio
+import requests
 from fastmcp.server.auth import AccessToken, AuthProvider, MultiAuth, TokenVerifier
 from fastmcp.server.auth.providers.in_memory import InMemoryOAuthProvider
 from fastmcp.utilities.ui import create_secure_html_response
@@ -59,6 +62,47 @@ CLIENT_SECRET_ENV = "MCP_OAUTH_CLIENT_SECRET"
 REDIRECT_URIS_ENV = "MCP_OAUTH_REDIRECT_URIS"  # comma-separated; exact-matched
 # Claude.ai's fixed connector callback (exact-match required).
 DEFAULT_REDIRECT_URIS = ("https://claude.ai/api/mcp/auth_callback",)
+
+# CIMD (Client ID Metadata Documents, SEP-991) — how ChatGPT registers: the
+# client_id is an HTTPS URL hosting the client's metadata JSON. We fetch + validate
+# it instead of storing a registration. This is what makes ChatGPT connect without
+# DCR. SSRF-hardened: https-only, short timeout, size cap, no redirects, blocked
+# private/loopback/link-local/metadata IPs.
+CIMD_ALLOW_LOOPBACK_ENV = "MCP_OAUTH_CIMD_ALLOW_LOOPBACK"  # TEST ONLY (serve a local doc)
+CIMD_TIMEOUT_S = 3.0
+CIMD_MAX_BYTES = 10 * 1024
+CIMD_CACHE_TTL_S = 3600
+
+
+def _ssrf_guard(url: str, *, allow_loopback: bool) -> None:
+    p = urlparse(url)
+    if not allow_loopback and p.scheme != "https":
+        raise ValueError("CIMD client_id must be an https URL")
+    if p.scheme not in ("https", "http") or not p.hostname:
+        raise ValueError(f"bad CIMD url {url!r}")
+    port = p.port or (443 if p.scheme == "https" else 80)
+    for *_, sa in socket.getaddrinfo(p.hostname, port, proto=socket.IPPROTO_TCP):
+        ip = ipaddress.ip_address(sa[0])
+        if (ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved
+                or ip.is_multicast) and not allow_loopback:
+            raise ValueError(f"CIMD target blocked (SSRF): {ip}")
+
+
+def _fetch_cimd(url: str, *, allow_loopback: bool) -> dict:
+    _ssrf_guard(url, allow_loopback=allow_loopback)
+    r = requests.get(url, timeout=CIMD_TIMEOUT_S, allow_redirects=False,
+                     headers={"Accept": "application/json"}, stream=True)
+    if r.status_code != 200:
+        raise ValueError(f"CIMD fetch returned {r.status_code}")
+    body = r.raw.read(CIMD_MAX_BYTES + 1, decode_content=True)
+    if len(body) > CIMD_MAX_BYTES:
+        raise ValueError("CIMD document too large")
+    meta = json.loads(body)
+    if meta.get("client_id") != url:  # anti-spoof: id in the doc MUST equal the URL
+        raise ValueError("CIMD client_id does not match its URL")
+    if not meta.get("redirect_uris"):
+        raise ValueError("CIMD document has no redirect_uris")
+    return meta
 
 MIN_PASSWORD_LEN = 16
 MAX_CLIENTS = 100
@@ -184,9 +228,47 @@ class SelfHostedOAuthProvider(InMemoryOAuthProvider):
         self._trust_proxy = trust_proxy
         self._pending: dict[str, _Pending] = {}
         self._fail_times: dict[str, list[float]] = {}
+        self._cimd_cache: dict[str, tuple] = {}
+        self._cimd_allow_loopback = os.environ.get(CIMD_ALLOW_LOOPBACK_ENV) == "1"
         self._load_state()
         if static_client_id:
             self._register_static(static_client_id, static_client_secret, redirect_uris)
+
+    async def get_client(self, client_id: str):
+        """A URL client_id → CIMD (ChatGPT); anything else → the stored clients
+        (the static client, or persisted DCR clients)."""
+        if client_id.startswith(("https://", "http://")):
+            return await self._cimd_client(client_id)
+        return await super().get_client(client_id)
+
+    async def _cimd_client(self, url: str):
+        now = time.time()
+        hit = self._cimd_cache.get(url)
+        if hit and hit[1] > now:
+            return hit[0]
+        from pydantic import AnyUrl
+        try:
+            meta = await anyio.to_thread.run_sync(
+                lambda: _fetch_cimd(url, allow_loopback=self._cimd_allow_loopback))
+            client = OAuthClientInformationFull(
+                client_id=url,
+                client_secret=None,
+                redirect_uris=[AnyUrl(u) for u in meta["redirect_uris"]],
+                client_name=meta.get("client_name"),
+                grant_types=meta.get("grant_types", ["authorization_code", "refresh_token"]),
+                response_types=["code"],
+                # Public client (PKCE) — our /login password is the real gate, so we
+                # don't verify a private_key_jwt assertion.
+                token_endpoint_auth_method="none",
+            )
+        except Exception as exc:  # SSRF block, fetch/parse/validation failure
+            logger.warning("CIMD fetch rejected for %s: %s", url, exc)
+            return None  # → SDK returns a clean "unauthorized_client", not a 500
+        self._cimd_cache[url] = (client, now + CIMD_CACHE_TTL_S)
+        # The base authorize() requires the client in self.clients; register the
+        # validated CIMD client transiently (re-fetched/refreshed on cache expiry).
+        self.clients[url] = client
+        return client
 
     def _register_static(self, client_id, client_secret, redirect_uris) -> None:
         from pydantic import AnyUrl
@@ -227,7 +309,23 @@ class SelfHostedOAuthProvider(InMemoryOAuthProvider):
         return f"{str(self.base_url).rstrip('/')}/login?sid={sid}"
 
     def get_routes(self, mcp_path: str | None = None) -> list[Route]:
-        routes = super().get_routes(mcp_path)
+        # Advertise CIMD so ChatGPT uses it (it keys off this metadata flag). The
+        # AS-metadata route is CORS-wrapped, so instead of touching the route we
+        # briefly patch build_metadata to stamp the flag on the object the
+        # MetadataHandler serializes — then restore it.
+        import mcp.server.auth.routes as _r
+        _orig = _r.build_metadata
+
+        def _patched(*a, **k):
+            m = _orig(*a, **k)
+            m.client_id_metadata_document_supported = True
+            return m
+
+        _r.build_metadata = _patched
+        try:
+            routes = super().get_routes(mcp_path)
+        finally:
+            _r.build_metadata = _orig
         routes.append(Route("/login", self._login, methods=["GET", "POST"]))
         return routes
 

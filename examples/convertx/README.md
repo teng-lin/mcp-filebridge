@@ -49,7 +49,11 @@ Two things must be publicly reachable: the **MCP endpoint** and the **bucket**.
 Auth is handled by FastMCP and composed via `MultiAuth` — set either or both:
 - **Bearer** (`MCP_BEARER_TOKEN`) — for Claude Code / Desktop (send `Authorization: Bearer …`).
 - **Self-hosted OAuth** (`MCP_OAUTH_PASSWORD` + `MCP_OAUTH_BASE_URL`) — for the **claude.ai web** connector, whose UI is OAuth-only. A tiny single-tenant OAuth 2.1 server (`oauth.py`, adapted from zlibrary-mcp) runs Authorization Code + PKCE + token issue/refresh via `InMemoryOAuthProvider`, gated by one password at `/login` (scrypt-hashed, constant-time, per-IP throttled). State persists to `MCP_OAUTH_STATE_PATH` (a full-account secret — the `oauth-state` volume).
-- **Client registration:** setting `MCP_OAUTH_CLIENT_ID` **disables open Dynamic Client Registration** and pre-registers that one client (the recommended posture — DCR's `/register` is an unauthenticated write surface). The claude.ai callback is exact-match allowlisted. Leave it unset to keep open DCR. *(CIMD / RFC 8707 audience-binding — the fuller ChatGPT-oriented path — is noted but not implemented here.)*
+- **Client registration (no DCR):** setting `MCP_OAUTH_CLIENT_ID` **disables open Dynamic Client Registration** (its `/register` is an unauthenticated write surface) and supports two modern paths instead:
+  - **Claude.ai → static Client ID.** Pre-registers one client (the claude.ai callback exact-match allowlisted); enter `MCP_OAUTH_CLIENT_ID`/`_SECRET` in Advanced settings.
+  - **ChatGPT → CIMD** (Client ID Metadata Documents, SEP-991). A URL `client_id` is fetched, validated (`client_id` must equal the URL, `redirect_uri` must be allowlisted in the doc), cached, and used on the fly — the metadata advertises `client_id_metadata_document_supported: true`, which ChatGPT keys off. The fetch is **SSRF-hardened**: https-only, 3s timeout, 10 KB cap, no redirects, and blocked loopback/private/link-local/metadata IPs. CIMD clients are treated as public + PKCE (the `/login` password is the real gate, so a `private_key_jwt` assertion isn't verified).
+
+  Caveats: **RFC 8707 audience-binding is not implemented** (tokens are opaque, single-tenant — `aud` isn't asserted), and the ChatGPT path is validated against a **simulated** CIMD client, not a live ChatGPT connector. `MCP_OAUTH_CIMD_ALLOW_LOOPBACK=1` relaxes the SSRF guard for local testing only — never set it in production.
 
 Fail-closed: a non-loopback bind with **no** bearer, **no** OAuth, and no `MCP_ALLOW_EXTERNAL_BIND=1` refuses to start.
 
