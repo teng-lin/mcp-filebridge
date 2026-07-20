@@ -58,29 +58,40 @@ def _b64url_decode(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
-def _valid_ticket(token: str) -> bool:
+def _ticket_payload(token: str):
+    """Return the verified, unexpired ticket payload dict, or None."""
     try:
         payload_b64, sig_b64 = token.split(".", 1)
     except ValueError:
-        return False
+        return None
     expected = base64.urlsafe_b64encode(
         hmac.new(_SIGN_KEY, payload_b64.encode(), hashlib.sha256).digest()
     ).rstrip(b"=").decode()
     if not hmac.compare_digest(expected, sig_b64):
-        return False
+        return None
     try:
-        return float(json.loads(_b64url_decode(payload_b64)).get("exp", 0)) >= time.time()
+        data = json.loads(_b64url_decode(payload_b64))
     except Exception:
-        return False
+        return None
+    return data if float(data.get("exp", 0)) >= time.time() else None
+
+
+def _md_key_for(src_key: str) -> str:
+    """Deterministic .md key from src_key — MUST match server.mjs mdKeyFor so to_markdown reuses it."""
+    parts = (src_key or "").split("/")
+    if len(parts) >= 3 and parts[1]:
+        stem = os.path.splitext(parts[2])[0] or "document"
+        return f"md/{parts[1]}/{stem}.md"
+    return f"out/{secrets.token_hex(8)}/document.md"
 
 
 _S3_BUCKET = os.environ.get("S3_BUCKET", "markdownify")
 
 
-def _store_markdown(md: str, stem: str) -> str | None:
-    """PUT the .md to S3 (internal endpoint) and return a presigned GET URL against the PUBLIC
-    endpoint (browser-reachable), with an attachment disposition so the link downloads. Returns
-    None if S3 isn't reachable — the widget then falls back to Copy-only."""
+def _store_markdown(md: str, md_key: str) -> str | None:
+    """PUT the .md to S3 at md_key (internal endpoint) and return a presigned GET URL against the
+    PUBLIC endpoint (browser-reachable) with an attachment disposition, so the link downloads and
+    to_markdown(src_key) reuses the same object. None if S3 is unreachable → widget falls back to Copy."""
     try:
         import boto3  # lazy: keeps the gateway importable without boto3
         from botocore.config import Config
@@ -90,12 +101,11 @@ def _store_markdown(md: str, stem: str) -> str | None:
                      aws_secret_access_key=os.environ.get("S3_SECRET_KEY"), region_name="us-east-1", config=cfg)
         internal = boto3.client("s3", endpoint_url=os.environ.get("S3_ENDPOINT", "http://minio:9000"), **creds)
         public = boto3.client("s3", endpoint_url=os.environ.get("S3_PUBLIC_ENDPOINT") or os.environ.get("S3_ENDPOINT"), **creds)
-        key = f"out/{secrets.token_hex(8)}/{stem}.md"
-        disp = f'attachment; filename="{stem}.md"'
-        internal.put_object(Bucket=_S3_BUCKET, Key=key, Body=md.encode("utf-8"), ContentType="text/markdown; charset=utf-8")
+        disp = f'attachment; filename="{os.path.basename(md_key)}"'
+        internal.put_object(Bucket=_S3_BUCKET, Key=md_key, Body=md.encode("utf-8"), ContentType="text/markdown; charset=utf-8")
         return public.generate_presigned_url(
             "get_object",
-            Params={"Bucket": _S3_BUCKET, "Key": key, "ResponseContentDisposition": disp},
+            Params={"Bucket": _S3_BUCKET, "Key": md_key, "ResponseContentDisposition": disp},
             ExpiresIn=int(os.environ.get("MD_DOWNLOAD_TTL", "86400")),
         )
     except Exception as exc:  # noqa: BLE001
@@ -106,7 +116,8 @@ def _store_markdown(md: str, stem: str) -> str | None:
 async def convert_route(request: Request) -> Response:
     if request.method == "OPTIONS":
         return Response(status_code=204, headers=_CORS)
-    if not _valid_ticket(request.path_params["token"]):
+    ticket = _ticket_payload(request.path_params["token"])
+    if ticket is None:
         return PlainTextResponse("invalid or expired upload ticket", status_code=403, headers=_CORS)
     body = b""
     async for chunk in request.stream():
@@ -116,7 +127,7 @@ async def convert_route(request: Request) -> Response:
     if not body:
         return PlainTextResponse("empty body", status_code=400, headers=_CORS)
     filename = os.path.basename(request.query_params.get("filename", "upload.bin")) or "upload.bin"
-    stem, ext = os.path.splitext(filename)
+    _, ext = os.path.splitext(filename)
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "src" + (ext or ".bin"))
         with open(path, "wb") as fh:
@@ -127,8 +138,11 @@ async def convert_route(request: Request) -> Response:
             md = MarkItDown().convert(path).text_content
         except Exception as exc:  # noqa: BLE001 — surface the reason to the widget
             return PlainTextResponse(f"conversion failed: {exc}", status_code=500, headers=_CORS)
+    # Store at the deterministic md_key derived from src_key (in the ticket) so a later
+    # to_markdown(src_key) reuses this exact object instead of converting again.
+    md_key = _md_key_for(ticket.get("k", ""))
     payload = {"markdown": md, "filename": filename}
-    download_url = _store_markdown(md, stem or "document")
+    download_url = _store_markdown(md, md_key)
     if download_url:
         payload["download_url"] = download_url
     return JSONResponse(payload, headers=_CORS)

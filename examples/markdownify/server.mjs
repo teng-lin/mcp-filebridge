@@ -24,7 +24,8 @@ const execFileP = promisify(execFile);
 const env = process.env;
 const BUCKET = env.S3_BUCKET || "markdownify";
 const MARKITDOWN = env.MARKITDOWN_BIN || "markitdown";
-const INLINE_CAP = Number(env.MD_INLINE_CAP || 200_000);
+const PREVIEW_BYTES = Number(env.MD_PREVIEW_BYTES || 6000);  // markdown chars put into chat by default (~1.5K tokens)
+const FULL_CAP = Number(env.MD_FULL_CAP || 60_000);          // full=true inlines only up to ~15K tokens; bigger stays preview+link
 const s3cfg = (endpoint) => ({
   endpoint, region: "us-east-1", forcePathStyle: true,
   credentials: { accessKeyId: env.S3_ACCESS_KEY || "spikekey", secretAccessKey: env.S3_SECRET_KEY || "spikesecret" },
@@ -47,8 +48,13 @@ const widgetDomain = createHash("sha256").update(PUBLIC_BASE + "/mcp").digest("h
 // shared with the Python gateway via env (it spawns this backend with the same os.environ).
 const SIGN_KEY = env.MCP_UPLOAD_SIGNING_KEY || env.MCP_BEARER_TOKEN || "dev-key";
 const b64url = (buf) => Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-function mintConvertUrl() {
-  const payload = b64url(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 300 }));
+function mdKeyFor(srcKey) {   // deterministic .md key so the widget's conversion is reachable by to_markdown(src_key)
+  const p = String(srcKey || "").split("/");
+  const stem = (p[2] || p[p.length - 1] || "document").replace(/\.[^.]+$/, "");
+  return `md/${p[1] || randomUUID()}/${stem}.md`;
+}
+function mintConvertUrl(srcKey) {
+  const payload = b64url(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 300, k: srcKey }));
   const sig = b64url(createHmac("sha256", SIGN_KEY).update(payload).digest());
   return `${PUBLIC_BASE}/u/convert/${payload}.${sig}`;
 }
@@ -132,29 +138,64 @@ async function waitForKey(key, timeoutS = 55) {
   return false;
 }
 
-async function toMarkdown(srcKey, filename) {
-  if (!(await waitForKey(srcKey))) throw new Error(`upload for '${path.basename(srcKey)}' not received yet — call to_markdown again once the user has uploaded.`);
-  const name = path.basename(filename || srcKey);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mdfy-"));
-  const local = path.join(dir, name);
-  fs.writeFileSync(local, await getBytes(srcKey));
-  const { stdout: md } = await execFileP(MARKITDOWN, [local], { maxBuffer: 64 * 1024 * 1024 });
-  fs.rmSync(dir, { recursive: true, force: true });
-  if (md.length <= INLINE_CAP) return { content: [{ type: "text", text: md }] };
-  const key = `out/${randomUUID()}/${name.replace(/\.[^.]+$/, "")}.md`;
-  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: md }));
-  const dl = await files.offerDownload({ key, filename: `${name}.md`, mime: "text/markdown" });
-  return { content: [{ type: "text", text: `Markdown ready (large): ${dl.url}` }], structuredContent: dl };
+async function keyExists(key) {
+  try { await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key })); return true; } catch { return false; }
+}
+
+// Context-safe: returns a PREVIEW + a download link + a paging handle (md_key) by DEFAULT — never the
+// whole document, which for a big file would flood the model's context on every subsequent turn. Reuses
+// the widget's already-converted .md (keyed off src_key) so a file is never converted twice.
+async function toMarkdown(srcKey, filename, full = false) {
+  const mdKey = mdKeyFor(srcKey);
+  let md;
+  if (await keyExists(mdKey)) {
+    md = (await getBytes(mdKey)).toString("utf-8");           // widget already converted this file
+  } else {
+    if (!(await waitForKey(srcKey))) throw new Error(`upload for '${path.basename(srcKey)}' not received yet — call to_markdown again once the file is uploaded.`);
+    const name = path.basename(filename || srcKey);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mdfy-"));
+    const local = path.join(dir, name);
+    fs.writeFileSync(local, await getBytes(srcKey));
+    md = (await execFileP(MARKITDOWN, [local], { maxBuffer: 64 * 1024 * 1024 })).stdout;
+    fs.rmSync(dir, { recursive: true, force: true });
+    await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: mdKey, Body: md, ContentType: "text/markdown" }));
+  }
+  const bytes = Buffer.byteLength(md, "utf-8");
+  const dl = await files.offerDownload({ key: mdKey, filename: path.basename(mdKey), mime: "text/markdown" });
+  if (full && bytes <= FULL_CAP) {
+    return { content: [{ type: "text", text: md }], structuredContent: { md_key: mdKey, bytes, truncated: false, download_url: dl.url } };
+  }
+  const preview = md.slice(0, PREVIEW_BYTES);
+  const truncated = preview.length < md.length;
+  const kTok = Math.max(1, Math.round(bytes / 4000));
+  const footer = truncated
+    ? `\n\n---\n[preview: first ${preview.length} of ${bytes} bytes (~${kTok}K tokens total). Full .md: ${dl.url}\nPage more with read_markdown(md_key="${mdKey}", offset=${preview.length}); or to_markdown(..., full=true) if it's small.]`
+    : `\n\n---\n[complete — ${bytes} bytes. Download: ${dl.url}]`;
+  return { content: [{ type: "text", text: preview + footer }], structuredContent: { md_key: mdKey, bytes, truncated, preview_bytes: preview.length, download_url: dl.url } };
+}
+
+async function readMarkdown(mdKey, offset = 0, limit = 8000) {
+  const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: mdKey }));  // throws if the key is unknown
+  const total = head.ContentLength;
+  offset = Math.max(0, offset | 0);
+  const end = Math.min(offset + Math.max(1, limit | 0), total);
+  if (offset >= total) return { content: [{ type: "text", text: "" }], structuredContent: { offset, returned: 0, total, next_offset: null } };
+  const r = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: mdKey, Range: `bytes=${offset}-${end - 1}` }));
+  const buf = Buffer.from(await r.Body.transformToByteArray());
+  return { content: [{ type: "text", text: buf.toString("utf-8") }], structuredContent: { offset, returned: buf.length, total, next_offset: end < total ? end : null } };
 }
 
 const TOOLS = [
   { name: "upload_file",
-    description: "STEP 1: get the file the user wants as Markdown. Shows an inline upload widget and returns an upload target (src_key + presigned URL + link). The widget auto-runs to_markdown after upload; if there's no widget, call to_markdown(src_key, filename) next — it waits for the upload.",
+    description: "STEP 1: get the file the user wants as Markdown. Shows an inline upload widget and returns an upload target (src_key + presigned URL + link). The widget converts on upload and shows the result there. To also bring the Markdown INTO THE CHAT, call to_markdown(src_key) next — it reuses the widget's conversion (or converts an agent PUT) and returns a context-safe preview + paging handle.",
     inputSchema: { type: "object", properties: { filename: { type: "string", description: "source filename with extension, e.g. report.pdf" } }, required: ["filename"] },
     _meta: TOOL_META },
   { name: "to_markdown",
-    description: "STEP 2: convert the uploaded file (src_key) to Markdown via markitdown (PDF/PPTX/XLSX/DOCX/image/audio…). Blocks until the upload lands, then returns the markdown (or a .md download link if huge). Call right after upload_file.",
-    inputSchema: { type: "object", properties: { src_key: { type: "string" }, filename: { type: "string" } }, required: ["src_key"] } },
+    description: "STEP 2: convert the uploaded file (src_key) to Markdown via markitdown (PDF/PPTX/XLSX/DOCX/image/audio…). Blocks until the upload lands. Returns a PREVIEW + a download link + a paging handle (md_key) — NOT the whole document, to protect the context window. Pass full=true to inline a small file; use read_markdown to page a big one.",
+    inputSchema: { type: "object", properties: { src_key: { type: "string" }, filename: { type: "string" }, full: { type: "boolean", description: "inline the entire markdown (small files only; capped)" } }, required: ["src_key"] } },
+  { name: "read_markdown",
+    description: "Read a byte slice of an already-converted document by md_key (returned by to_markdown). Returns bytes [offset, offset+limit) plus next_offset, so you can page through large markdown without loading it all into context.",
+    inputSchema: { type: "object", properties: { md_key: { type: "string" }, offset: { type: "integer", description: "byte offset (default 0)" }, limit: { type: "integer", description: "max bytes to return (default 8000)" } }, required: ["md_key"] } },
 ];
 
 const server = new Server({ name: "markdownify-filebridge", version: "0.1.0" }, { capabilities: { tools: {}, resources: {} } });
@@ -171,10 +212,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const offer = await files.offerUpload({ filename: a.filename });
     // Flatten to the widget's contract: it reads upload_url + src_key + filename.
     const sc = { ...offer, upload_url: offer.agent_upload?.url, upload_link: offer.human_upload?.url,
-      convert_url: mintConvertUrl(), filename: a.filename };
-    return { content: [{ type: "text", text: `Upload ${a.filename} in the widget above (or ${sc.upload_link}); I'll convert it to Markdown.` }], structuredContent: sc, _meta: TOOL_META };
+      convert_url: mintConvertUrl(offer.src_key), filename: a.filename };
+    return { content: [{ type: "text", text: `Upload ${a.filename} in the widget above (or ${sc.upload_link}); then call to_markdown(src_key="${offer.src_key}") to bring the Markdown into the chat.` }], structuredContent: sc, _meta: TOOL_META };
   }
-  if (name === "to_markdown") return await toMarkdown(a.src_key, a.filename);
+  if (name === "to_markdown") return await toMarkdown(a.src_key, a.filename, a.full === true);
+  if (name === "read_markdown") return await readMarkdown(a.md_key, a.offset || 0, a.limit || 8000);
   throw new Error(`unknown tool: ${name}`);
 });
 
