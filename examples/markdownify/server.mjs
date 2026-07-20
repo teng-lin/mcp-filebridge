@@ -76,12 +76,21 @@ progress{display:block;width:100%;margin-top:10px;height:8px}#out{white-space:pr
 <script type=module>
 const $=i=>document.getElementById(i);
 const sub=$('sub'),out=$('out'),fi=$('f'),btn=$('up'),pg=$('pg'),mdEl=$('md'),actions=$('actions');
-const getconv=o=>o&&o.convert_url||null; let convUrl=null;   // the widget POSTs bytes to convert_url; server converts on receipt
+const getconv=o=>o&&o.convert_url||null; let convUrl=null, srcKey=null, cvSeq=0;
+const oai=window.openai;
 window.onReady=h=>{sub.textContent=h+" · ready";};
 window.onToolResult=p=>{if(p.toolResult)p=p.toolResult;let d=p.structuredContent;
  if(!getconv(d)&&Array.isArray(p.content))for(const c of p.content)if(c&&c.type==="text"){try{const j=JSON.parse(c.text);if(getconv(j))d=j}catch(e){}}
  if(!getconv(d)&&getconv(p))d=p;const u=getconv(d);
- if(u&&!convUrl){convUrl=u;window.__gotResult=true;fi.disabled=false;sub.textContent="pick a file to convert to Markdown";}};
+ if(u&&!convUrl){convUrl=u;srcKey=d.src_key;window.__gotResult=true;fi.disabled=false;sub.textContent="pick a file to convert to Markdown";}};
+// After the server finishes converting, DRIVE the agent to pull the result into the chat — same
+// mechanism as the convertx widget (ChatGPT: callTool returns; claude.ai: a fire-and-forget
+// tools/call → the model runs to_markdown, which REUSES this conversion and posts the preview +
+// download link into the conversation). Hard-allowlisted to to_markdown so a spoofed message can't
+// redirect the tool, and the arg is our own src_key.
+function autoDrive(){if(!srcKey)return;const args={src_key:srcKey};
+ if(oai&&typeof oai.callTool==="function"){try{oai.callTool("to_markdown",args);return;}catch(e){}}
+ window.wpost({jsonrpc:"2.0",id:"tm"+(++cvSeq),method:"tools/call",params:{name:"to_markdown",arguments:args}});}
 ${BRIDGE_JS}
 fi.addEventListener('change',()=>{btn.disabled=!(fi.files&&fi.files.length);});
 btn.addEventListener('click',()=>{const file=fi.files&&fi.files[0];if(!file||!convUrl){return;}
@@ -97,7 +106,7 @@ btn.addEventListener('click',()=>{const file=fi.files&&fi.files[0];if(!file||!co
    sub.textContent="✅ converted "+file.name+" ("+md.length+" chars)";
    if(j.download_url){$('lk').value=j.download_url;$('lkrow').style.display="";}
    else{$('lkrow').style.display="none";}   // no server URL → Copy Markdown only
-   window.wsize();}
+   window.wsize();autoDrive();}   // ← pull the result into the chat automatically (no "done" needed)
   else{sub.textContent="conversion failed";out.textContent="["+x.status+"] "+x.responseText.slice(0,240);btn.disabled=false;fi.disabled=false;}};
  x.onerror=()=>{pg.style.display="none";sub.textContent="";out.textContent="❌ network/CORS error reaching the server";btn.disabled=false;fi.disabled=false;};
  x.send(file);});
@@ -170,7 +179,7 @@ async function readMarkdown(mdKey, offset = 0, limit = 8000) {
 
 const TOOLS = [
   { name: "upload_file",
-    description: "Show the inline upload widget for the file the user wants as Markdown; returns src_key + a presigned URL + link. IMPORTANT: the widget converts the file the moment it's uploaded and shows the Markdown + a download link RIGHT THERE — that path is self-contained and instant, so tell the user to pick the file in the widget (it'll convert and give them a download link on the spot); do NOT ask them to report back or say 'done'. ONLY call to_markdown(src_key) if the user then asks for the Markdown pasted into THIS chat (to read/use it here) — it reuses the widget's conversion (no re-upload) and returns a context-safe preview + paging handle.",
+    description: "Show the inline upload widget for the file the user wants as Markdown; returns src_key + a presigned URL + link. The widget converts the file on upload, shows the Markdown + a download link right there, AND automatically drives a to_markdown call so the preview + download link land in THIS chat too. So just show the widget and tell the user to pick their file — you don't need to wait, ask them to report back, or call anything yourself; the to_markdown result will arrive on its own. (Only if that auto-pull doesn't appear, call to_markdown(src_key) yourself — it reuses the widget's conversion, no re-upload.)",
     inputSchema: { type: "object", properties: { filename: { type: "string", description: "source filename with extension, e.g. report.pdf" } }, required: ["filename"] },
     _meta: TOOL_META },
   { name: "to_markdown",
@@ -196,7 +205,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     // Flatten to the widget's contract: it reads upload_url + src_key + filename.
     const sc = { ...offer, upload_url: offer.agent_upload?.url, upload_link: offer.human_upload?.url,
       convert_url: mintConvertUrl(offer.src_key), filename: a.filename };
-    return { content: [{ type: "text", text: `Widget shown. Tell the user to pick ${a.filename} in the widget above (or open ${sc.upload_link}) — it converts on upload and gives them the Markdown + a download link right there, so nothing more is needed from you. If they then ask for the Markdown in this chat, call to_markdown(src_key="${offer.src_key}") (it reuses the widget's conversion — no re-upload).` }], structuredContent: sc, _meta: TOOL_META };
+    return { content: [{ type: "text", text: `Widget shown. Tell the user to pick ${a.filename} in the widget above (or open ${sc.upload_link}). It converts on upload, shows the Markdown + download link there, and auto-drives to_markdown so the result lands in this chat — nothing more needed from you. (Fallback: to_markdown(src_key="${offer.src_key}") if it doesn't appear.)` }], structuredContent: sc, _meta: TOOL_META };
   }
   if (name === "to_markdown") return await toMarkdown(a.src_key, a.filename, a.full === true);
   if (name === "read_markdown") return await readMarkdown(a.md_key, a.offset || 0, a.limit || 8000);
