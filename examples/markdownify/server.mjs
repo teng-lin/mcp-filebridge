@@ -67,7 +67,7 @@ button{font-size:15px;padding:9px 16px;border-radius:8px;border:0;background:#2f
 .mini{font-size:13px;padding:5px 10px;background:#eef2fb;color:#2f6df7}
 progress{display:block;width:100%;margin-top:10px;height:8px}#out{white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12px;margin-top:10px;color:#4a564e}
 #md{display:none;width:100%;height:220px;margin-top:12px;font-family:ui-monospace,monospace;font-size:12px;border:1px solid #dde2da;border-radius:8px;padding:8px;box-sizing:border-box;background:#fafbfa;color:#1c2420}
-#actions{display:none;margin-top:8px}#actions a{margin-left:10px;font-weight:600;color:#2f6df7;text-decoration:none}
+#actions{display:none;margin-top:8px}#lk{width:100%;font-size:11px;padding:5px;margin-top:3px;box-sizing:border-box;font-family:ui-monospace,monospace}#cl{margin-top:4px}
 @media(prefers-color-scheme:dark){body{color:#e6eae4}.card{background:#1d231f;border-color:#313a33}#out{color:#b7c0b8}.mini{background:#243043}#md{background:#151a16;border-color:#313a33;color:#e6eae4}}</style></head>
 <body><div class=card><div class=head>📄 File → Markdown</div>
 <div id=sub style="font-size:12px;color:#6b7a6e;margin-top:3px">starting…</div>
@@ -75,7 +75,9 @@ progress{display:block;width:100%;margin-top:10px;height:8px}#out{white-space:pr
 <progress id=pg value=0 max=100 style="display:none"></progress>
 <div id=out></div>
 <textarea id=md readonly></textarea>
-<div id=actions><button id=cp class=mini>Copy</button><a id=dl download>⬇ Download .md</a></div></div>
+<div id=actions><button id=cp class=mini>Copy Markdown</button> <a id=dl class=mini target=_blank rel=noopener style="display:inline-block;padding:5px 10px;text-decoration:none">⬇ Download</a>
+<div id=lkrow><div style="margin-top:8px;font-size:12px;color:#6b7a6e">Or open this link in a browser tab (claude.ai blocks in-widget downloads):</div>
+<input id=lk readonly onclick="this.select()"><button id=cl class=mini>Copy link</button></div></div></div>
 <script type=module>
 const $=i=>document.getElementById(i);
 const sub=$('sub'),out=$('out'),fi=$('f'),btn=$('up'),pg=$('pg'),mdEl=$('md'),actions=$('actions');
@@ -107,14 +109,14 @@ btn.addEventListener('click',()=>{const file=fi.files&&fi.files[0];if(!file||!co
    const md=(j.markdown!==undefined)?j.markdown:x.responseText;
    mdEl.value=md;mdEl.style.display="block";actions.style.display="block";
    sub.textContent="✅ converted "+file.name+" ("+md.length+" chars)";
-   const dl=$('dl');
-   if(j.download_url){dl.href=j.download_url;dl.removeAttribute("download");dl.textContent="⬇ Download .md (opens in browser)";dl.style.display="";}
-   else{dl.style.display="none";}   // no server URL → Copy only (a blob download is blocked in the sandbox)
+   if(j.download_url){$('dl').href=j.download_url;$('dl').style.display="";$('lk').value=j.download_url;$('lkrow').style.display="";}
+   else{$('dl').style.display="none";$('lkrow').style.display="none";}   // no server URL → Copy Markdown only
    size();}
   else{sub.textContent="conversion failed";out.textContent="["+x.status+"] "+x.responseText.slice(0,240);btn.disabled=false;fi.disabled=false;}};
  x.onerror=()=>{pg.style.display="none";sub.textContent="";out.textContent="❌ network/CORS error reaching the server";btn.disabled=false;fi.disabled=false;};
  x.send(file);});
-$('cp').addEventListener('click',()=>{mdEl.select();try{document.execCommand('copy')}catch(e){}});
+$('cp').addEventListener('click',()=>{mdEl.select();try{document.execCommand('copy')}catch(e){}$('cp').textContent="Copied ✓";setTimeout(()=>$('cp').textContent="Copy Markdown",1200);});
+$('cl').addEventListener('click',()=>{const l=$('lk');l.select();try{document.execCommand('copy')}catch(e){}$('cl').textContent="Copied ✓";setTimeout(()=>$('cl').textContent="Copy link",1200);});
 </script></body></html>`;
 
 async function ensureBucket() { try { await s3.send(new CreateBucketCommand({ Bucket: BUCKET })); } catch {} }
