@@ -170,7 +170,7 @@ async function readMarkdown(mdKey, offset = 0, limit = 8000) {
 
 const TOOLS = [
   { name: "upload_file",
-    description: "STEP 1: get the file the user wants as Markdown. Shows an inline upload widget and returns an upload target (src_key + presigned URL + link). The widget converts on upload and shows the result there. To also bring the Markdown INTO THE CHAT, call to_markdown(src_key) next — it reuses the widget's conversion (or converts an agent PUT) and returns a context-safe preview + paging handle.",
+    description: "Show the inline upload widget for the file the user wants as Markdown; returns src_key + a presigned URL + link. IMPORTANT: the widget converts the file the moment it's uploaded and shows the Markdown + a download link RIGHT THERE — that path is self-contained and instant, so tell the user to pick the file in the widget (it'll convert and give them a download link on the spot); do NOT ask them to report back or say 'done'. ONLY call to_markdown(src_key) if the user then asks for the Markdown pasted into THIS chat (to read/use it here) — it reuses the widget's conversion (no re-upload) and returns a context-safe preview + paging handle.",
     inputSchema: { type: "object", properties: { filename: { type: "string", description: "source filename with extension, e.g. report.pdf" } }, required: ["filename"] },
     _meta: TOOL_META },
   { name: "to_markdown",
@@ -196,7 +196,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     // Flatten to the widget's contract: it reads upload_url + src_key + filename.
     const sc = { ...offer, upload_url: offer.agent_upload?.url, upload_link: offer.human_upload?.url,
       convert_url: mintConvertUrl(offer.src_key), filename: a.filename };
-    return { content: [{ type: "text", text: `Upload ${a.filename} in the widget above (or ${sc.upload_link}); then call to_markdown(src_key="${offer.src_key}") to bring the Markdown into the chat.` }], structuredContent: sc, _meta: TOOL_META };
+    return { content: [{ type: "text", text: `Widget shown. Tell the user to pick ${a.filename} in the widget above (or open ${sc.upload_link}) — it converts on upload and gives them the Markdown + a download link right there, so nothing more is needed from you. If they then ask for the Markdown in this chat, call to_markdown(src_key="${offer.src_key}") (it reuses the widget's conversion — no re-upload).` }], structuredContent: sc, _meta: TOOL_META };
   }
   if (name === "to_markdown") return await toMarkdown(a.src_key, a.filename, a.full === true);
   if (name === "read_markdown") return await readMarkdown(a.md_key, a.offset || 0, a.limit || 8000);
