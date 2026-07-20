@@ -48,6 +48,24 @@ Set `S3_PUBLIC_ENDPOINT`/`PUBLIC_BASE_URL`/`MCP_OAUTH_BASE_URL` to those hostnam
 connector at `https://markdownify.<domain>/mcp`, and enter the password at `/login`. For a
 managed bucket instead of the bundled MinIO, point `S3_ENDPOINT`/`S3_PUBLIC_ENDPOINT` at R2/S3.
 
+## Tests
+Pure logic (HMAC tickets, `md_key` derivation, convert-route control flow) is unit-tested in
+both languages, with a cross-language parity suite and a live end-to-end integration test:
+
+```bash
+# JS units (node's built-in runner) — _convert.mjs
+cd examples/markdownify && npm test
+# Python units + parity + integration (from repo root)
+pip install -r tests/requirements-dev.txt
+pytest tests/test_markdownify_gateway.py tests/test_markdownify_parity.py   # units + JS↔Py parity
+pytest -m integration tests/test_markdownify_integration.py                 # needs the stack on :8090
+```
+
+`_convert.mjs` (JS, mints) and `_convert.py` (Python, verifies) hold the shared ticket/key logic;
+the parity tests shell out to node to prove they stay byte-compatible. The integration test drives
+upload_file → `/u/convert` → to_markdown reuse → `read_markdown` paging, and asserts a big file's
+preview stays capped.
+
 ## Status
 - ✅ **Validated**: local (bearer gateway → TS backend → markitdown), in-container end-to-end, and the proxy hop over a live Cloudflare quick tunnel.
 - ⏳ **Not yet done**: the final claude.ai *UI* connect through a stable tunnel hostname (needs a Cloudflare dashboard route), and the MCP-Apps widget on the TS backend (the widget HTML is language-neutral; wiring its `_meta` on the TS SDK is the remaining polish).

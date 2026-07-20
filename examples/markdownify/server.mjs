@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID, createHash, createHmac } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import {
   S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CreateBucketCommand,
 } from "@aws-sdk/client-s3";
@@ -19,6 +19,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { S3FileHelper } from "../../ts/s3_filebridge.mjs";
+import { mdKeyFor, mintTicket } from "./_convert.mjs";
 
 const execFileP = promisify(execFile);
 const env = process.env;
@@ -46,18 +47,10 @@ const widgetDomain = createHash("sha256").update(PUBLIC_BASE + "/mcp").digest("h
 // Signed ticket for the gateway's POST /u/convert/<token> route — the widget uploads bytes
 // straight to the server (like notebooklm's /files/ul), which converts on receipt. HMAC key is
 // shared with the Python gateway via env (it spawns this backend with the same os.environ).
+// mdKeyFor / mintTicket live in _convert.mjs (byte-compatible with the Python twin _convert.py).
+// The HMAC key is shared with the gateway via env (it spawns this backend with the same os.environ).
 const SIGN_KEY = env.MCP_UPLOAD_SIGNING_KEY || env.MCP_BEARER_TOKEN || "dev-key";
-const b64url = (buf) => Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-function mdKeyFor(srcKey) {   // deterministic .md key so the widget's conversion is reachable by to_markdown(src_key)
-  const p = String(srcKey || "").split("/");
-  const stem = (p[2] || p[p.length - 1] || "document").replace(/\.[^.]+$/, "");
-  return `md/${p[1] || randomUUID()}/${stem}.md`;
-}
-function mintConvertUrl(srcKey) {
-  const payload = b64url(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 300, k: srcKey }));
-  const sig = b64url(createHmac("sha256", SIGN_KEY).update(payload).digest());
-  return `${PUBLIC_BASE}/u/convert/${payload}.${sig}`;
-}
+const mintConvertUrl = (srcKey) => `${PUBLIC_BASE}/u/convert/${mintTicket(srcKey, SIGN_KEY)}`;
 const WIDGET_META = {
   "openai/widgetCSP": { connect_domains: [PUBLIC_BASE, S3_PUBLIC], resource_domains: [] },
   ui: { domain: widgetDomain, csp: { connectDomains: [PUBLIC_BASE, S3_PUBLIC] }, prefersBorder: true },

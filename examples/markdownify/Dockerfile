@@ -17,7 +17,8 @@ COPY ts/ /app/ts/
 COPY examples/convertx/oauth.py /app/examples/convertx/oauth.py
 COPY examples/markdownify/package.json examples/markdownify/package-lock.json /app/examples/markdownify/
 RUN cd /app/examples/markdownify && (npm ci --omit=dev || npm install --omit=dev)
-COPY examples/markdownify/server.mjs examples/markdownify/gateway.py /app/examples/markdownify/
+COPY examples/markdownify/server.mjs examples/markdownify/_convert.mjs \
+     examples/markdownify/gateway.py examples/markdownify/_convert.py /app/examples/markdownify/
 
 RUN useradd --create-home --uid 10001 app && mkdir -p /data && chown 10001:10001 /data
 USER app

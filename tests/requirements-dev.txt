@@ -1,3 +1,5 @@
 # Test deps (plus the runtime deps in examples/convertx/requirements.txt).
 pytest>=8
 httpx>=0.27
+requests>=2.31        # markdownify integration test (POST to /u/convert, fetch download_url)
+# JS unit tests use node's built-in runner: cd examples/markdownify && npm test
