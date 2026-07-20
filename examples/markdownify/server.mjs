@@ -74,8 +74,8 @@ progress{display:block;width:100%;margin-top:10px;height:8px}#out{white-space:pr
 <progress id=pg value=0 max=100 style="display:none"></progress>
 <div id=out></div>
 <textarea id=md readonly></textarea>
-<div id=actions><button id=cp class=mini>Copy Markdown</button> <a id=dl class=mini target=_blank rel=noopener style="display:inline-block;padding:5px 10px;text-decoration:none">⬇ Download</a>
-<div id=lkrow><div style="margin-top:8px;font-size:12px;color:#6b7a6e">Or open this link in a browser tab (claude.ai blocks in-widget downloads):</div>
+<div id=actions><button id=cp class=mini>Copy Markdown</button>
+<div id=lkrow><div style="margin-top:8px;font-size:12px;color:#6b7a6e">To save a file: ask me for the download link in the chat (it's clickable there), or copy this link and open it in a browser tab — claude.ai blocks downloads inside the widget itself.</div>
 <input id=lk readonly onclick="this.select()"><button id=cl class=mini>Copy link</button></div></div></div>
 <script type=module>
 const $=i=>document.getElementById(i);
@@ -108,8 +108,8 @@ btn.addEventListener('click',()=>{const file=fi.files&&fi.files[0];if(!file||!co
    const md=(j.markdown!==undefined)?j.markdown:x.responseText;
    mdEl.value=md;mdEl.style.display="block";actions.style.display="block";
    sub.textContent="✅ converted "+file.name+" ("+md.length+" chars)";
-   if(j.download_url){$('dl').href=j.download_url;$('dl').style.display="";$('lk').value=j.download_url;$('lkrow').style.display="";}
-   else{$('dl').style.display="none";$('lkrow').style.display="none";}   // no server URL → Copy Markdown only
+   if(j.download_url){$('lk').value=j.download_url;$('lkrow').style.display="";}
+   else{$('lkrow').style.display="none";}   // no server URL → Copy Markdown only
    size();}
   else{sub.textContent="conversion failed";out.textContent="["+x.status+"] "+x.responseText.slice(0,240);btn.disabled=false;fi.disabled=false;}};
  x.onerror=()=>{pg.style.display="none";sub.textContent="";out.textContent="❌ network/CORS error reaching the server";btn.disabled=false;fi.disabled=false;};
@@ -161,9 +161,12 @@ async function toMarkdown(srcKey, filename, full = false) {
   const preview = md.slice(0, PREVIEW_BYTES);
   const truncated = preview.length < md.length;
   const kTok = Math.max(1, Math.round(bytes / 4000));
+  // Present the download as a markdown link so it renders CLICKABLE in the chat (chat links
+  // aren't sandboxed like the widget iframe, so this is the download path that actually works).
+  const dlLink = `[⬇ Download ${path.basename(mdKey)}](${dl.url})`;
   const footer = truncated
-    ? `\n\n---\n[preview: first ${preview.length} of ${bytes} bytes (~${kTok}K tokens total). Full .md: ${dl.url}\nPage more with read_markdown(md_key="${mdKey}", offset=${preview.length}); or to_markdown(..., full=true) if it's small.]`
-    : `\n\n---\n[complete — ${bytes} bytes. Download: ${dl.url}]`;
+    ? `\n\n---\n${dlLink}  ·  preview: first ${preview.length} of ${bytes} bytes (~${kTok}K tokens). Page more with read_markdown(md_key="${mdKey}", offset=${preview.length}); or to_markdown(..., full=true) if it's small.`
+    : `\n\n---\n${dlLink}  ·  complete (${bytes} bytes).`;
   return { content: [{ type: "text", text: preview + footer }], structuredContent: { md_key: mdKey, bytes, truncated, preview_bytes: preview.length, download_url: dl.url } };
 }
 
