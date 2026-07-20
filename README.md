@@ -73,7 +73,7 @@ docker run -d --name minio -p 9100:9000 \
 # Python helper self-check
 pip install -e . && python3 -m mcp_filebridge.s3_filebridge
 # cross-language parity (needs Node + MinIO)
-cd ts && npm install && cd .. && python3 verify_parity.py
+cd ts && npm ci && cd .. && python3 verify_parity.py   # npm ci = reproducible install from the lockfile
 
 # test suite
 pip install -r tests/requirements-dev.txt -r examples/convertx/requirements.txt

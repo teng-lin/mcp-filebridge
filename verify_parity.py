@@ -64,7 +64,12 @@ golden = normalize(py_offer)
 proc = subprocess.run(["node", "s3_filebridge.mjs"], cwd=HERE / "ts",
                       capture_output=True, text=True)
 if proc.returncode != 0:
-    sys.exit(f"TS twin failed:\n{proc.stderr}")
+    # A missing OR corrupt/partial ts/node_modules surfaces here as a cryptic @aws-sdk runtime
+    # error (e.g. "retryStrategy.retry is not a function"). `npm ci` in ts/ reinstalls a clean tree.
+    hint = "\n\nHint: run `npm ci` in ts/ — the @aws-sdk deps look missing/incomplete." \
+        if not (HERE / "ts" / "node_modules" / "@aws-sdk").is_dir() \
+        else "\n\nHint: if this is an @aws-sdk error, `npm ci` in ts/ reinstalls a clean tree."
+    sys.exit(f"TS twin failed:\n{proc.stderr}{hint}")
 ts_out = json.loads(proc.stdout)
 ts_norm = normalize(ts_out["offer"])
 
