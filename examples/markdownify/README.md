@@ -60,9 +60,9 @@ Pure logic (HMAC tickets, `md_key` derivation, convert-route control flow) is un
 ```bash
 cd ts && npm test                          # JS units (node --test) — ts/convert.mjs
 # from repo root:
-pip install -r tests/requirements-dev.txt
-pytest tests/test_markdownify_gateway.py tests/test_markdownify_parity.py   # units + JS↔Py parity
-pytest -m integration tests/test_markdownify_integration.py                 # live stack on :8090
+pip install -r python/tests/requirements-dev.txt
+cd python && pytest tests/test_markdownify_gateway.py tests/test_markdownify_parity.py   # units + JS↔Py parity
+cd python && pytest -m integration tests/test_markdownify_integration.py                 # live stack on :8090
 ```
 
 The parity tests shell out to `node` to prove `ts/convert.mjs` and `mcp_filebridge/convert.py` stay byte-compatible (a drift silently breaks widget→chat reuse or convert auth). The integration test drives `upload_file → /u/convert → to_markdown reuse → read_markdown` paging and asserts a big file's preview stays capped.

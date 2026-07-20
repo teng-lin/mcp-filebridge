@@ -21,8 +21,10 @@ from fastmcp.apps import AppConfig, ResourceCSP
 
 from mcp_filebridge.gates import widget_domain as _widget_domain  # shared render gate (parity-tested)
 
-# Shared MCP-Apps host bridge, single-sourced with the markdownify widget (server.mjs).
-_BRIDGE = open(os.path.join(os.path.dirname(__file__), "widget_bridge.js")).read().replace("__CLIENT_NAME__", "convertx-upload")
+# Shared MCP-Apps host bridge — bundled as package data (so the wheel is self-contained) and
+# single-sourced with the markdownify widget. Read via importlib.resources (works installed or editable).
+from importlib.resources import files as _pkg_files  # noqa: E402
+_BRIDGE = (_pkg_files("mcp_filebridge") / "widget_bridge.js").read_text().replace("__CLIENT_NAME__", "convertx-upload")
 
 _WIDGET_URI = "ui://convertx/upload-v1"
 _WIDGET_FLAG = "MCP_UPLOAD_WIDGET"  # default on; set to "0" to disable

@@ -20,7 +20,8 @@ from dataclasses import dataclass
 
 import requests
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))  # repo root
+sys.path.insert(0, os.path.join(  # repo-root/python, so mcp_filebridge imports without `pip install`
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "python"))
 from mcp_filebridge.s3_filebridge import S3FileHelper, make_client
 
 

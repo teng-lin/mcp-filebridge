@@ -20,7 +20,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 pytestmark = pytest.mark.integration
 
 BASE = os.environ.get("MARKDOWNIFY_MCP_URL", "http://localhost:8090").rstrip("/")
-MDFY = Path(__file__).resolve().parents[1] / "examples" / "markdownify"
+MDFY = Path(__file__).resolve().parents[2] / "examples" / "markdownify"
 
 
 def _reachable(url: str) -> bool:

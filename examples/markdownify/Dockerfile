@@ -14,10 +14,10 @@ ENV PATH=/venv/bin:$PATH MARKITDOWN_BIN=markitdown
 
 WORKDIR /app
 COPY ts/ /app/ts/
-# The shared library (oauth + convert route), installed editable; deps already in the venv → --no-deps.
-COPY pyproject.toml /app/pyproject.toml
-COPY mcp_filebridge/ /app/mcp_filebridge/
-RUN /venv/bin/pip install --no-cache-dir -e . --no-deps
+# The shared library (python/) installed editable; deps already in the venv → --no-deps.
+# The widget-bridge asset ships inside the package (package-data); server.mjs reads that copy.
+COPY python/ /app/python/
+RUN /venv/bin/pip install --no-cache-dir -e ./python --no-deps
 COPY examples/markdownify/package.json examples/markdownify/package-lock.json /app/examples/markdownify/
 RUN cd /app/examples/markdownify && (npm ci --omit=dev || npm install --omit=dev)
 COPY examples/markdownify/server.mjs examples/markdownify/gateway.py /app/examples/markdownify/

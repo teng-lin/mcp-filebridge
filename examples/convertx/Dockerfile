@@ -8,11 +8,10 @@ WORKDIR /app
 COPY examples/convertx/requirements.txt examples/convertx/requirements.txt
 RUN pip install --no-cache-dir -r examples/convertx/requirements.txt
 
-# The shared library (oauth + widget + s3_filebridge), installed editable; deps already
-# came from requirements.txt, so --no-deps. Then the example itself.
-COPY pyproject.toml /app/pyproject.toml
-COPY mcp_filebridge/ /app/mcp_filebridge/
-RUN pip install --no-cache-dir -e . --no-deps
+# The shared library (python/) installed editable; deps already came from requirements.txt,
+# so --no-deps. The widget-bridge asset ships inside the package (package-data) — no spec/ needed.
+COPY python/ /app/python/
+RUN pip install --no-cache-dir -e ./python --no-deps
 COPY examples/convertx/server.py /app/examples/convertx/server.py
 
 # Create the OAuth-state mount point owned by the runtime user, so a fresh named

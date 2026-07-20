@@ -49,7 +49,9 @@ const WIDGET_META = resourceMeta(widgetDomain(PUBLIC_BASE), [PUBLIC_BASE, S3_PUB
 const WIDGET_RESOURCE = { uri: WIDGET_URI, name: "markdownify upload", mimeType: "text/html;profile=mcp-app", _meta: WIDGET_META };
 const TOOL_META = toolMeta(WIDGET_URI);
 // Shared MCP-Apps host bridge (single-sourced with the convertx widget in mcp_filebridge/widget_bridge.js).
-const BRIDGE_JS = fs.readFileSync(new URL("../../mcp_filebridge/widget_bridge.js", import.meta.url), "utf8")
+// The bridge is package data of mcp_filebridge (the widget component that owns it); this polyglot
+// example already bundles that package (gateway.py imports it), so read the one shared copy.
+const BRIDGE_JS = fs.readFileSync(new URL("../../python/mcp_filebridge/widget_bridge.js", import.meta.url), "utf8")
   .replaceAll("__CLIENT_NAME__", "mdfy-upload");
 const WIDGET_HTML = `<!doctype html>
 <html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=color-scheme content="light dark">

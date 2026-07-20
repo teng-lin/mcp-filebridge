@@ -14,12 +14,11 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
-sys.path.insert(0, str(Path(__file__).parent))  # repo root, so `mcp_filebridge` imports without install
+HERE = Path(__file__).resolve().parent          # spec/  (offer.golden.json lives here)
+ROOT = HERE.parent                              # repo root (python/, ts/)
+sys.path.insert(0, str(ROOT / "python"))        # so `mcp_filebridge` imports without `pip install`
 from mcp_filebridge import s3_filebridge as fb  # the Python helper
-import boto3
-from botocore.client import Config
 
-HERE = Path(__file__).parent
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 
@@ -61,13 +60,13 @@ golden = normalize(py_offer)
 (HERE / "offer.golden.json").write_text(json.dumps(golden, indent=2, sort_keys=True))
 
 # --- TS offer (run the Node twin, read its JSON) --------------------------- #
-proc = subprocess.run(["node", "s3_filebridge.mjs"], cwd=HERE / "ts",
+proc = subprocess.run(["node", "s3_filebridge.mjs"], cwd=ROOT / "ts",
                       capture_output=True, text=True)
 if proc.returncode != 0:
     # A missing OR corrupt/partial ts/node_modules surfaces here as a cryptic @aws-sdk runtime
     # error (e.g. "retryStrategy.retry is not a function"). `npm ci` in ts/ reinstalls a clean tree.
     hint = "\n\nHint: run `npm ci` in ts/ — the @aws-sdk deps look missing/incomplete." \
-        if not (HERE / "ts" / "node_modules" / "@aws-sdk").is_dir() \
+        if not (ROOT / "ts" / "node_modules" / "@aws-sdk").is_dir() \
         else "\n\nHint: if this is an @aws-sdk error, `npm ci` in ts/ reinstalls a clean tree."
     sys.exit(f"TS twin failed:\n{proc.stderr}{hint}")
 ts_out = json.loads(proc.stdout)

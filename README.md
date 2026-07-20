@@ -8,15 +8,26 @@ This repo keeps the two genuinely valuable pieces of [`mcp_filebridge`](https://
 
 ## What's here
 
+Three homes — two self-contained language libraries and the language-neutral contract they share:
+
 ```
-mcp_filebridge/           # the Python library (pip install -e .): s3_filebridge, oauth, widget, convert
-ts/                       # the JS library: s3_filebridge.mjs (@aws-sdk twin) + convert.mjs (ticket/md_key)
-verify_parity.py          # golden-vector test: proves Python & TS emit byte-identical normalized offers
-offer.golden.json         # the normalized offer contract (checked in)
+python/                   # the Python library → pip
+  mcp_filebridge/         #   s3_filebridge, oauth, widget, convert, gates (+ widget_bridge.js package-data)
+  tests/                  #   pytest (unit + parity + integration)
+  pyproject.toml
+ts/                       # the JS library → npm
+  s3_filebridge.mjs (@aws-sdk twin), convert.mjs, widget_gates.mjs (+ *.test.mjs)
+  package.json
+spec/                     # the language-neutral contract both libs must satisfy
+  offer.golden.json       #   the offer-contract conformance vector (checked in)
+  verify_parity.py        #   proves Python & TS emit byte-identical normalized offers
 examples/convertx/        # deployable example — ConvertX (1000+ formats) behind a Python MCP server
 examples/markdownify/     # deployable example — markitdown behind a TypeScript backend + Python OAuth gateway
-tests/                    # pytest (unit + parity + integration); JS unit tests live in ts/
 ```
+
+The shared MCP-Apps widget host-bridge is **package data** of `mcp_filebridge` (bundled in the wheel,
+read via `importlib.resources`), so the Python package stays self-contained; the polyglot markdownify
+example reads that same copy.
 
 ## Two things this repo demonstrates
 
@@ -70,16 +81,16 @@ docker run -d --name minio -p 9100:9000 \
 ```
 
 ```bash
-# Python helper self-check
-pip install -e . && python3 -m mcp_filebridge.s3_filebridge
+# Python library + helper self-check
+pip install -e ./python && python3 -m mcp_filebridge.s3_filebridge
 # cross-language parity (needs Node + MinIO)
-cd ts && npm ci && cd .. && python3 verify_parity.py   # npm ci = reproducible install from the lockfile
+cd ts && npm ci && cd .. && python3 spec/verify_parity.py   # npm ci = reproducible install from the lockfile
 
 # test suite
-pip install -r tests/requirements-dev.txt -r examples/convertx/requirements.txt
-pytest                 # unit + in-process OAuth + cross-language parity (no containers)
-pytest -m integration  # + live MinIO round-trip; markdownify e2e if the stack is on :8090
-cd examples/markdownify && npm test    # JS unit tests (node's built-in runner)
+pip install -r python/tests/requirements-dev.txt -r examples/convertx/requirements.txt
+cd python && pytest              # unit + in-process OAuth + cross-language parity (no containers)
+cd python && pytest -m integration   # + live MinIO round-trip; markdownify e2e if the stack is on :8090
+cd ts && npm test                # JS unit tests (node's built-in runner)
 ```
 
 Coverage spans the offer/widget/short-link logic, `await_upload`, the OAuth pieces (config validation, SSRF-guarded CIMD, bearer, static-client/DCR wiring, full authorize→login→token dances in-process), the markdownify convert route + HMAC tickets, and **cross-language parity** of the ticket + `md_key` derivation (Python↔TypeScript, shelling out to node).

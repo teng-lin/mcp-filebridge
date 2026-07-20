@@ -11,7 +11,7 @@ import pytest
 
 from mcp_filebridge import convert as cv
 
-TS_DIR = Path(__file__).resolve().parents[1] / "ts"
+TS_DIR = Path(__file__).resolve().parents[2] / "ts"
 SRC_KEYS = ["src/abc-123/report.docx", "src/u/a.b.pdf", "src/u/noext"]
 
 
