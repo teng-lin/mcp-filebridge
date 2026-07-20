@@ -23,6 +23,7 @@ spec/                     # the language-neutral contract both libs must satisfy
   verify_parity.py        #   proves Python & TS emit byte-identical normalized offers
 examples/convertx/        # deployable example — ConvertX (1000+ formats) behind a Python MCP server
 examples/markdownify/     # deployable example — markitdown behind a TypeScript backend + Python OAuth gateway
+examples/docling/         # deployable example — IBM Docling (layout/tables/OCR); the presigned URL IS the source
 ```
 
 The shared MCP-Apps widget host-bridge is **package data** of `mcp_filebridge` (bundled in the wheel,
@@ -45,7 +46,9 @@ example reads that same copy.
 
 `offer_download()` returns `download_ready` with a presigned `GET`. `await_upload()` blocks until the object lands (`head_object` poll).
 
-## The two examples
+A third example, **[examples/docling](examples/docling/README.md)**, wraps IBM Docling (layout/tables/OCR). It's the thinnest integration: Docling's `convert(source)` takes a **URL and fetches it server-side**, so the filebridge presigned URL *is* the source — no broker route, no staging.
+
+## The two flagship examples
 
 | | `examples/convertx` | `examples/markdownify` |
 |---|---|---|

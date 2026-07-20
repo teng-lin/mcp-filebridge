@@ -1,0 +1,56 @@
+# Docling MCP stack: the MCP server (IBM Docling) + a MinIO bucket.
+#   cp .env.example .env   # set MCP_BEARER_TOKEN (+ OAuth for claude.ai)
+#   docker compose up -d --build
+# First conversion downloads Docling's models into the docling-data volume (slow once, then cached).
+services:
+  minio:
+    image: quay.io/minio/minio:latest
+    command: server /data
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-spikekey}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-spikesecret}
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
+    ports: ["${MINIO_HOST_PORT:-9100}:9000"]
+    volumes: ["minio-data:/data"]
+
+  docling-mcp:
+    build:
+      context: ../..                     # repo root, so the image can COPY python/ + this example
+      dockerfile: examples/docling/Dockerfile
+    image: docling-filebridge:local
+    restart: unless-stopped
+    environment:
+      S3_ENDPOINT: http://minio:9000                                   # server + Docling fetch (internal)
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9100}  # widget PUT / download (browser)
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-spikekey}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-spikesecret}
+      S3_BUCKET: ${S3_BUCKET:-docling}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:9500}
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}
+      MCP_OAUTH_PASSWORD: ${MCP_OAUTH_PASSWORD:-}
+      MCP_OAUTH_BASE_URL: ${MCP_OAUTH_BASE_URL:-}
+      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}
+      MCP_OAUTH_CLIENT_SECRET: ${MCP_OAUTH_CLIENT_SECRET:-}
+      MCP_OAUTH_ALLOW_DCR: ${MCP_OAUTH_ALLOW_DCR:-}
+      MCP_OAUTH_TRUST_PROXY: "1"
+      MCP_HOST: "0.0.0.0"
+    ports: ["${MCP_HOST_PORT:-9500}:9500"]
+    volumes: ["docling-data:/data"]      # Docling model cache + OAuth state (a full-account secret)
+    depends_on:
+      minio: { condition: service_started }
+
+  cloudflared:
+    profiles: ["cloudflare"]
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
+      TUNNEL_TRANSPORT_PROTOCOL: http2   # QUIC/UDP 7844 egress is often blocked
+    depends_on:
+      docling-mcp: { condition: service_started }
+
+volumes:
+  minio-data:
+  docling-data:
