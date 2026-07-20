@@ -21,6 +21,9 @@ from fastmcp.apps import AppConfig, ResourceCSP
 
 from mcp_filebridge.gates import widget_domain as _widget_domain  # shared render gate (parity-tested)
 
+# Shared MCP-Apps host bridge, single-sourced with the markdownify widget (server.mjs).
+_BRIDGE = open(os.path.join(os.path.dirname(__file__), "widget_bridge.js")).read().replace("__CLIENT_NAME__", "convertx-upload")
+
 _WIDGET_URI = "ui://convertx/upload-v1"
 _WIDGET_FLAG = "MCP_UPLOAD_WIDGET"  # default on; set to "0" to disable
 
@@ -51,40 +54,19 @@ _WIDGET_HTML = """<!doctype html>
 </div>
 <script type="module">
  const sub=document.getElementById('sub'),out=document.getElementById('out'),fi=document.getElementById('f'),btn=document.getElementById('up'),pg=document.getElementById('pg');
- const log=m=>{out.textContent+=(out.textContent?"\\n":"")+m;size();};
- const post=m=>{try{window.parent.postMessage(m,"*")}catch(e){}};
- const oai=window.openai;
- let initialized=false, uploadUrl=null, srcKey=null, target=null, cvSeq=0;
+ const log=m=>{out.textContent+=(out.textContent?"\\n":"")+m;window.wsize();};
+ let uploadUrl=null, srcKey=null, target=null, cvSeq=0;
  const CONVERT_TOOL="convert";   // hard allowlist: a spoofed postMessage can't redirect which tool runs
  const geturl=o=>o&&o.upload_url||null;
- function size(){post({jsonrpc:"2.0",method:"ui/notifications/size-changed",
-   params:{height:document.documentElement.scrollHeight,width:document.documentElement.scrollWidth}});}
- function ready(h){if(initialized)return;initialized=true;
-   sub.textContent=(h||(oai?"ChatGPT":"host"))+" · ready";
-   post({jsonrpc:"2.0",method:"ui/notifications/initialized",params:{}});}   // claude.ai render gate
- post({jsonrpc:"2.0",id:1,method:"ui/initialize",params:{capabilities:{},protocolVersion:"2026-01-26",
-   clientInfo:{name:"convertx-upload",version:"1"},appCapabilities:{availableDisplayModes:["inline"]}}});
- setTimeout(()=>ready(oai?"ChatGPT":null),500);
- function consider(p){ if(!p)return; if(p.toolResult)p=p.toolResult;
-   let d=p.structuredContent;
-   if(!geturl(d)&&Array.isArray(p.content))for(const c of p.content)if(c&&c.type==="text"){
-     try{const j=JSON.parse(c.text);if(geturl(j))d=j}catch(e){}}
-   if(!geturl(d)&&geturl(p))d=p;
-   const u=geturl(d);
-   if(u&&!uploadUrl){uploadUrl=u;srcKey=d.src_key;target=d.target;fi.disabled=false;sub.textContent="pick the file to upload";}
- }
- // claude.ai: tool result via postMessage. We don't allowlist ev.origin: the only thing a message
- // can set is uploadUrl, and the CSP connect-src pins uploads to the bucket + the presigned URL is a
- // server-signed single-use target, so a spoofed URL can't exfiltrate or land anything.
- window.addEventListener("message",ev=>{let d=ev.data;if(d==null)return;
-   if(typeof d==="string"){try{d=JSON.parse(d)}catch(e){return}}
-   if(d.result&&!d.method){ready(d.result.hostInfo&&d.result.hostInfo.name);
-     if(d.result.toolResult)consider(d.result.toolResult);return;}
-   if(typeof d.method==="string"){if(d.method.includes("tool"))consider(d.params||{});
-     else if(d.id!=null)post({jsonrpc:"2.0",id:d.id,result:{}});}});
- function pullOai(){if(oai&&oai.toolOutput)consider(oai.toolOutput);}
- window.addEventListener("openai:set_globals",pullOai);
- let _pt=0;const _pi=setInterval(()=>{pullOai();if(uploadUrl||++_pt>66)clearInterval(_pi);},300);
+ window.onReady=h=>{sub.textContent=h+" · ready";};
+ // The bridge (below) hands us each tool-result payload; we don't allowlist ev.origin because the
+ // only thing a message can set is uploadUrl, and the CSP connect-src pins uploads to the bucket +
+ // the presigned URL is a server-signed single-use target — a spoofed URL can't exfiltrate or land.
+ window.onToolResult=p=>{ if(p.toolResult)p=p.toolResult; let d=p.structuredContent;
+   if(!geturl(d)&&Array.isArray(p.content))for(const c of p.content)if(c&&c.type==="text"){try{const j=JSON.parse(c.text);if(geturl(j))d=j}catch(e){}}
+   if(!geturl(d)&&geturl(p))d=p; const u=geturl(d);
+   if(u&&!uploadUrl){uploadUrl=u;srcKey=d.src_key;target=d.target;window.__gotResult=true;fi.disabled=false;sub.textContent="pick the file to upload";} };
+ //__BRIDGE__
  // XHR upload so we can drive a progress bar (fetch can't report upload progress) — nlm-py #1950.
  function putFile(url,file,onp){return new Promise((res,rej)=>{
    const x=new XMLHttpRequest(); x.open("PUT",url);
@@ -98,7 +80,7 @@ _WIDGET_HTML = """<!doctype html>
  function autoConvert(fname){ if(!srcKey)return null;
    const args={src_key:srcKey,target:target||"",filename:fname||""};  // pass the REAL picked name → output keeps its stem
    if(oai&&typeof oai.callTool==="function"){try{return oai.callTool(CONVERT_TOOL,args);}catch(e){return null;}}
-   post({jsonrpc:"2.0",id:"cv"+(++cvSeq),method:"tools/call",params:{name:CONVERT_TOOL,arguments:args}}); return null;}
+   window.wpost({jsonrpc:"2.0",id:"cv"+(++cvSeq),method:"tools/call",params:{name:CONVERT_TOOL,arguments:args}}); return null;}
  fi.addEventListener('change',()=>{btn.disabled=!(fi.files&&fi.files.length);});
  btn.addEventListener('click',async()=>{
    const file=fi.files&&fi.files[0]; if(!file||!uploadUrl){log("no file selected yet");return;}
@@ -116,12 +98,13 @@ _WIDGET_HTML = """<!doctype html>
          if(o.url){const a=document.createElement("a");a.href=o.url;a.target="_blank";
            a.textContent="⬇ Download "+(o.filename||"result");
            a.style.cssText="display:block;margin-top:10px;font-weight:600;color:#2f6df7";
-           document.querySelector(".card").appendChild(a);size();}
+           document.querySelector(".card").appendChild(a);window.wsize();}
        }catch(e){sub.textContent="✅ uploaded — ask me to convert it";}
      } else { sub.textContent="✅ uploaded — converting…"; }   // claude.ai: convert runs; link appears in chat
    }catch(e){pg.style.display="none";log("❌ upload failed (CSP/CORS/network): "+e);btn.disabled=false;fi.disabled=false;}
  });
 </script></body></html>"""
+_WIDGET_HTML = _WIDGET_HTML.replace("//__BRIDGE__", _BRIDGE)
 
 
 def register_upload_widget(mcp: FastMCP, files, s3_public_endpoint: str, public_base_url: str,

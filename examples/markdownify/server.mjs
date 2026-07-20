@@ -48,6 +48,9 @@ const mintConvertUrl = (srcKey) => `${PUBLIC_BASE}/u/convert/${mintTicket(srcKey
 const WIDGET_META = resourceMeta(widgetDomain(PUBLIC_BASE), [PUBLIC_BASE, S3_PUBLIC]);
 const WIDGET_RESOURCE = { uri: WIDGET_URI, name: "markdownify upload", mimeType: "text/html;profile=mcp-app", _meta: WIDGET_META };
 const TOOL_META = toolMeta(WIDGET_URI);
+// Shared MCP-Apps host bridge (single-sourced with the convertx widget in mcp_filebridge/widget_bridge.js).
+const BRIDGE_JS = fs.readFileSync(new URL("../../mcp_filebridge/widget_bridge.js", import.meta.url), "utf8")
+  .replaceAll("__CLIENT_NAME__", "mdfy-upload");
 const WIDGET_HTML = `<!doctype html>
 <html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=color-scheme content="light dark">
 <style>body{font-family:system-ui,sans-serif;margin:0;padding:14px;background:transparent;color:#1c2420}
@@ -71,22 +74,13 @@ progress{display:block;width:100%;margin-top:10px;height:8px}#out{white-space:pr
 <script type=module>
 const $=i=>document.getElementById(i);
 const sub=$('sub'),out=$('out'),fi=$('f'),btn=$('up'),pg=$('pg'),mdEl=$('md'),actions=$('actions');
-const post=m=>{try{window.parent.postMessage(m,"*")}catch(e){}};
-const oai=window.openai; let initialized=false,convUrl=null;
-const getconv=o=>o&&o.convert_url||null;   // widget uploads bytes straight to the server, which converts on receipt
-function size(){post({jsonrpc:"2.0",method:"ui/notifications/size-changed",params:{height:document.documentElement.scrollHeight,width:document.documentElement.scrollWidth}});}
-function ready(h){if(initialized)return;initialized=true;sub.textContent=(h||(oai?"ChatGPT":"host"))+" · ready";post({jsonrpc:"2.0",method:"ui/notifications/initialized",params:{}});}
-post({jsonrpc:"2.0",id:1,method:"ui/initialize",params:{capabilities:{},protocolVersion:"2026-01-26",clientInfo:{name:"mdfy-upload",version:"1"},appCapabilities:{availableDisplayModes:["inline"]}}});
-setTimeout(()=>ready(oai?"ChatGPT":null),500);
-function consider(p){if(!p)return;if(p.toolResult)p=p.toolResult;let d=p.structuredContent;
+const getconv=o=>o&&o.convert_url||null; let convUrl=null;   // the widget POSTs bytes to convert_url; server converts on receipt
+window.onReady=h=>{sub.textContent=h+" · ready";};
+window.onToolResult=p=>{if(p.toolResult)p=p.toolResult;let d=p.structuredContent;
  if(!getconv(d)&&Array.isArray(p.content))for(const c of p.content)if(c&&c.type==="text"){try{const j=JSON.parse(c.text);if(getconv(j))d=j}catch(e){}}
  if(!getconv(d)&&getconv(p))d=p;const u=getconv(d);
- if(u&&!convUrl){convUrl=u;fi.disabled=false;sub.textContent="pick a file to convert to Markdown";}}
-window.addEventListener("message",ev=>{let d=ev.data;if(d==null)return;if(typeof d==="string"){try{d=JSON.parse(d)}catch(e){return}}
- if(d.result&&!d.method){ready(d.result.hostInfo&&d.result.hostInfo.name);if(d.result.toolResult)consider(d.result.toolResult);return;}
- if(typeof d.method==="string"){if(d.method.includes("tool"))consider(d.params||{});else if(d.id!=null)post({jsonrpc:"2.0",id:d.id,result:{}});}});
-function pullOai(){if(oai&&oai.toolOutput)consider(oai.toolOutput);}
-window.addEventListener("openai:set_globals",pullOai);let _pt=0;const _pi=setInterval(()=>{pullOai();if(convUrl||++_pt>66)clearInterval(_pi);},300);
+ if(u&&!convUrl){convUrl=u;window.__gotResult=true;fi.disabled=false;sub.textContent="pick a file to convert to Markdown";}};
+${BRIDGE_JS}
 fi.addEventListener('change',()=>{btn.disabled=!(fi.files&&fi.files.length);});
 btn.addEventListener('click',()=>{const file=fi.files&&fi.files[0];if(!file||!convUrl){return;}
  btn.disabled=true;fi.disabled=true;pg.style.display="block";pg.value=0;out.textContent="";mdEl.style.display="none";actions.style.display="none";
@@ -101,7 +95,7 @@ btn.addEventListener('click',()=>{const file=fi.files&&fi.files[0];if(!file||!co
    sub.textContent="✅ converted "+file.name+" ("+md.length+" chars)";
    if(j.download_url){$('lk').value=j.download_url;$('lkrow').style.display="";}
    else{$('lkrow').style.display="none";}   // no server URL → Copy Markdown only
-   size();}
+   window.wsize();}
   else{sub.textContent="conversion failed";out.textContent="["+x.status+"] "+x.responseText.slice(0,240);btn.disabled=false;fi.disabled=false;}};
  x.onerror=()=>{pg.style.display="none";sub.textContent="";out.textContent="❌ network/CORS error reaching the server";btn.disabled=false;fi.disabled=false;};
  x.send(file);});
