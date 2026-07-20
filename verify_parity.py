@@ -50,10 +50,7 @@ def normalize(offer: dict) -> dict:
 
 
 # --- Python offer ---------------------------------------------------------- #
-s3 = boto3.client("s3", endpoint_url="http://localhost:9100",
-                  aws_access_key_id="spikekey", aws_secret_access_key="spikesecret",
-                  region_name="us-east-1",
-                  config=Config(signature_version="s3v4", s3={"addressing_style": "path"}))
+s3 = fb.make_client("http://localhost:9100", "spikekey", "spikesecret")
 try:
     s3.head_bucket(Bucket="s3fb-spike")
 except Exception:

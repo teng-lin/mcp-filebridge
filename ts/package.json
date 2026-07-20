@@ -1,1 +1,1 @@
-{"name":"s3-filebridge-ts","version":"0.0.1","type":"module","private":true,"scripts":{"test":"node --test convert.test.mjs"},"dependencies":{"@aws-sdk/client-s3":"^3.1090.0","@aws-sdk/s3-request-presigner":"^3.1090.0"}}
+{"name": "s3-filebridge-ts", "version": "0.0.1", "type": "module", "private": true, "scripts": {"test": "node --test convert.test.mjs widget_gates.test.mjs"}, "dependencies": {"@aws-sdk/client-s3": "^3.1090.0", "@aws-sdk/s3-request-presigner": "^3.1090.0"}}

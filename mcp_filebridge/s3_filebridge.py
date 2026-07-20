@@ -22,6 +22,17 @@ from botocore.client import Config
 from botocore.exceptions import ClientError
 
 
+def make_client(endpoint_url: str, access_key: str, secret_key: str, *, region: str = "us-east-1"):
+    """A path-style SigV4 S3 client whose presigned URLs work on any S3-compatible backend
+    (MinIO / Cloudflare R2 / AWS S3). Centralizes the one Config every caller would otherwise
+    re-derive. The TypeScript twin is `makeS3Client` in ts/s3_filebridge.mjs."""
+    return boto3.client(
+        "s3", endpoint_url=endpoint_url,
+        aws_access_key_id=access_key, aws_secret_access_key=secret_key, region_name=region,
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+    )
+
+
 class ShortLinkStore:
     """Maps a short id -> a (long, ugly) presigned URL. In-memory; swap for
     Redis in prod. Exists because presigned URLs are long and get mangled in
@@ -152,10 +163,7 @@ class S3FileHelper:
 if __name__ == "__main__":
     import requests
 
-    s3 = boto3.client("s3", endpoint_url="http://localhost:9100",
-                      aws_access_key_id="spikekey", aws_secret_access_key="spikesecret",
-                      region_name="us-east-1",
-                      config=Config(signature_version="s3v4", s3={"addressing_style": "path"}))
+    s3 = make_client("http://localhost:9100", "spikekey", "spikesecret")
     BUCKET = "s3fb-spike"
     try:
         s3.head_bucket(Bucket=BUCKET)

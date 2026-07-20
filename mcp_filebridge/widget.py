@@ -13,21 +13,16 @@ here is the widget PUTs to an S3 presigned URL on a DIFFERENT origin, so the CSP
 """
 from __future__ import annotations
 
-import hashlib
 import os
 from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.apps import AppConfig, ResourceCSP
 
+from mcp_filebridge.gates import widget_domain as _widget_domain  # shared render gate (parity-tested)
+
 _WIDGET_URI = "ui://convertx/upload-v1"
 _WIDGET_FLAG = "MCP_UPLOAD_WIDGET"  # default on; set to "0" to disable
-
-
-def _widget_domain(base_url: str) -> str:
-    """claude.ai render gate: sha256("<base>/mcp")[:32] + .claudemcpcontent.com."""
-    endpoint = f"{base_url.rstrip('/')}/mcp"
-    return hashlib.sha256(endpoint.encode()).hexdigest()[:32] + ".claudemcpcontent.com"
 
 
 # Single-file picker → direct PUT to the S3 presigned URL. Reads the tool result

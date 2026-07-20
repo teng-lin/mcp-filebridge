@@ -56,6 +56,14 @@ def test_ticket_minted_in_python_verifies_in_js():
     assert p["k"] == "src/u/f.pdf" and p["exp"] == 1300
 
 
+def test_widget_domain_matches():
+    from mcp_filebridge import gates
+    bases = ["https://markdownify.hantekllc.com", "https://x.example/", "http://localhost:8090"]
+    js = ('import {widgetDomain} from "./widget_gates.mjs";'
+          f'console.log(JSON.stringify({json.dumps(bases)}.map(widgetDomain)));')
+    assert json.loads(_node(js)) == [gates.widget_domain(b) for b in bases]
+
+
 def test_js_ticket_with_wrong_key_fails_in_python():
     token = _node('import {mintTicket} from "./convert.mjs";'
                   'console.log(mintTicket("src/u/f.pdf","OTHER-key",{nowSec:1000,ttl:300}));')

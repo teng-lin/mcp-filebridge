@@ -7,9 +7,9 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
-  S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CreateBucketCommand,
+  PutObjectCommand, GetObjectCommand, HeadObjectCommand, CreateBucketCommand,
 } from "@aws-sdk/client-s3";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -18,8 +18,9 @@ import {
   ListResourcesRequestSchema, ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { S3FileHelper } from "../../ts/s3_filebridge.mjs";
+import { S3FileHelper, makeS3Client } from "../../ts/s3_filebridge.mjs";
 import { mdKeyFor, mintTicket } from "../../ts/convert.mjs";
+import { widgetDomain, resourceMeta, toolMeta } from "../../ts/widget_gates.mjs";
 
 const execFileP = promisify(execFile);
 const env = process.env;
@@ -27,14 +28,10 @@ const BUCKET = env.S3_BUCKET || "markdownify";
 const MARKITDOWN = env.MARKITDOWN_BIN || "markitdown";
 const PREVIEW_BYTES = Number(env.MD_PREVIEW_BYTES || 6000);  // markdown chars put into chat by default (~1.5K tokens)
 const FULL_CAP = Number(env.MD_FULL_CAP || 60_000);          // full=true inlines only up to ~15K tokens; bigger stays preview+link
-const s3cfg = (endpoint) => ({
-  endpoint, region: "us-east-1", forcePathStyle: true,
-  credentials: { accessKeyId: env.S3_ACCESS_KEY || "spikekey", secretAccessKey: env.S3_SECRET_KEY || "spikesecret" },
-  requestChecksumCalculation: "WHEN_REQUIRED", responseChecksumValidation: "WHEN_REQUIRED",
-});
-const s3 = new S3Client(s3cfg(env.S3_ENDPOINT || "http://localhost:9100"));
+const s3creds = { accessKeyId: env.S3_ACCESS_KEY || "spikekey", secretAccessKey: env.S3_SECRET_KEY || "spikesecret" };
+const s3 = makeS3Client(env.S3_ENDPOINT || "http://localhost:9100", s3creds);
 const presign = env.S3_PUBLIC_ENDPOINT && env.S3_PUBLIC_ENDPOINT !== env.S3_ENDPOINT
-  ? new S3Client(s3cfg(env.S3_PUBLIC_ENDPOINT)) : s3;
+  ? makeS3Client(env.S3_PUBLIC_ENDPOINT, s3creds) : s3;
 const files = new S3FileHelper(s3, BUCKET, env.PUBLIC_BASE_URL || "http://localhost:8080", { presignS3: presign });
 
 // --- MCP-Apps inline upload widget (renders a file picker in claude.ai/ChatGPT) ---
@@ -43,20 +40,14 @@ const files = new S3FileHelper(s3, BUCKET, env.PUBLIC_BASE_URL || "http://localh
 const WIDGET_URI = "ui://markdownify/upload-v1";
 const PUBLIC_BASE = (env.PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/+$/, "");
 const S3_PUBLIC = (env.S3_PUBLIC_ENDPOINT || env.S3_ENDPOINT || "http://localhost:9100").replace(/\/+$/, "");
-const widgetDomain = createHash("sha256").update(PUBLIC_BASE + "/mcp").digest("hex").slice(0, 32) + ".claudemcpcontent.com";
-// Signed ticket for the gateway's POST /u/convert/<token> route — the widget uploads bytes
-// straight to the server (like notebooklm's /files/ul), which converts on receipt. HMAC key is
-// shared with the Python gateway via env (it spawns this backend with the same os.environ).
-// mdKeyFor / mintTicket live in ts/convert.mjs (byte-compatible with the Python twin mcp_filebridge/convert.py).
-// The HMAC key is shared with the gateway via env (it spawns this backend with the same os.environ).
+// mdKeyFor / mintTicket (ts/convert.mjs) + the render gates (ts/widget_gates.mjs) are byte-compatible
+// with their Python twins (mcp_filebridge/convert.py, mcp_filebridge/gates.py). The HMAC key is shared
+// with the gateway via env (it spawns this backend with the same os.environ).
 const SIGN_KEY = env.MCP_UPLOAD_SIGNING_KEY || env.MCP_BEARER_TOKEN || "dev-key";
 const mintConvertUrl = (srcKey) => `${PUBLIC_BASE}/u/convert/${mintTicket(srcKey, SIGN_KEY)}`;
-const WIDGET_META = {
-  "openai/widgetCSP": { connect_domains: [PUBLIC_BASE, S3_PUBLIC], resource_domains: [] },
-  ui: { domain: widgetDomain, csp: { connectDomains: [PUBLIC_BASE, S3_PUBLIC] }, prefersBorder: true },
-};
+const WIDGET_META = resourceMeta(widgetDomain(PUBLIC_BASE), [PUBLIC_BASE, S3_PUBLIC]);
 const WIDGET_RESOURCE = { uri: WIDGET_URI, name: "markdownify upload", mimeType: "text/html;profile=mcp-app", _meta: WIDGET_META };
-const TOOL_META = { "ui/resourceUri": WIDGET_URI, "openai/outputTemplate": WIDGET_URI, ui: { resourceUri: WIDGET_URI, visibility: ["model"] } };
+const TOOL_META = toolMeta(WIDGET_URI);
 const WIDGET_HTML = `<!doctype html>
 <html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=color-scheme content="light dark">
 <style>body{font-family:system-ui,sans-serif;margin:0;padding:14px;background:transparent;color:#1c2420}

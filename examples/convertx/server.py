@@ -18,12 +18,10 @@ import time
 import uuid
 from dataclasses import dataclass
 
-import boto3
 import requests
-from botocore.client import Config
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))  # repo root
-from mcp_filebridge.s3_filebridge import S3FileHelper
+from mcp_filebridge.s3_filebridge import S3FileHelper, make_client
 
 
 # ---- config (env with local-compose defaults) ---------------------------- #
@@ -48,14 +46,8 @@ MCP_PORT = int(_env("MCP_PORT", "9400"))
 ALLOW_EXTERNAL_BIND = _env("MCP_ALLOW_EXTERNAL_BIND", "") == "1"
 
 
-def _s3(endpoint):
-    return boto3.client("s3", endpoint_url=endpoint,
-                        aws_access_key_id=S3_KEY, aws_secret_access_key=S3_SECRET,
-                        region_name="us-east-1",
-                        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}))
-
-s3 = _s3(S3_ENDPOINT)                                                 # get/put/head
-presign_s3 = _s3(S3_PUBLIC_ENDPOINT) if S3_PUBLIC_ENDPOINT != S3_ENDPOINT else s3
+s3 = make_client(S3_ENDPOINT, S3_KEY, S3_SECRET)                     # get/put/head
+presign_s3 = make_client(S3_PUBLIC_ENDPOINT, S3_KEY, S3_SECRET) if S3_PUBLIC_ENDPOINT != S3_ENDPOINT else s3
 files = S3FileHelper(s3, BUCKET, PUBLIC_BASE_URL, presign_s3=presign_s3)
 
 

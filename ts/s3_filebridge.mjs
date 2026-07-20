@@ -6,6 +6,17 @@ import { randomUUID } from "node:crypto";
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
+// A path-style S3 client whose presigned URLs work on any S3-compatible backend. The Python twin
+// is `make_client` in mcp_filebridge/s3_filebridge.py. WHEN_REQUIRED stops @aws-sdk v3 from signing
+// a CRC32 checksum into presigned URLs, which would break a plain PUT (no matching header) on real S3.
+export function makeS3Client(endpoint, { accessKeyId, secretAccessKey, region = "us-east-1" }) {
+  return new S3Client({
+    endpoint, region, forcePathStyle: true,
+    credentials: { accessKeyId, secretAccessKey },
+    requestChecksumCalculation: "WHEN_REQUIRED", responseChecksumValidation: "WHEN_REQUIRED",
+  });
+}
+
 export function uploadPage(putUrl) {
   const u = JSON.stringify(putUrl);
   return (
@@ -68,21 +79,12 @@ export class S3FileHelper {
 // network calls) — it runs only when executed directly (node s3_filebridge.mjs),
 // like Python's `if __name__ == "__main__"`.
 if (import.meta.filename === process.argv[1]) await (async () => {
-  const s3 = new S3Client({
-    endpoint: "http://localhost:9100", region: "us-east-1", forcePathStyle: true,
-    credentials: { accessKeyId: "spikekey", secretAccessKey: "spikesecret" },
-    // @aws-sdk v3 defaults to signing a CRC32 checksum into presigned URLs, which
-    // breaks a plain PUT (curl/browser fetch sends no matching checksum header) on
-    // real AWS S3. Match boto3's leaner presign and keep the URL usable by any client.
-    requestChecksumCalculation: "WHEN_REQUIRED",
-    responseChecksumValidation: "WHEN_REQUIRED",
-  });
+  const s3 = makeS3Client("http://localhost:9100", { accessKeyId: "spikekey", secretAccessKey: "spikesecret" });
   const h = new S3FileHelper(s3, "s3fb-spike", "https://mcp.example.test");
 
   // presignS3 seam (offline check): presigned host must follow the PUBLIC endpoint,
   // not the internal one — else remote hosts (claude.ai) get an unreachable URL.
-  const pub = new S3Client({ ...s3.config, endpoint: "https://s3.public.test", region: "us-east-1", forcePathStyle: true,
-    credentials: { accessKeyId: "spikekey", secretAccessKey: "spikesecret" } });
+  const pub = makeS3Client("https://s3.public.test", { accessKeyId: "spikekey", secretAccessKey: "spikesecret" });
   const seam = await new S3FileHelper(s3, "s3fb-spike", "https://mcp.example.test", { presignS3: pub }).offerUpload({ filename: "x.txt" });
   const seamHost = new URL(seam.agent_upload.url).host;
   if (seamHost !== "s3.public.test") throw new Error(`presignS3 seam broken: presigned against ${seamHost}, expected s3.public.test`);

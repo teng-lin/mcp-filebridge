@@ -18,21 +18,17 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
-  S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CreateBucketCommand,
+  PutObjectCommand, GetObjectCommand, HeadObjectCommand, CreateBucketCommand,
 } from "@aws-sdk/client-s3";
 
-import { S3FileHelper } from "../../ts/s3_filebridge.mjs";
+import { S3FileHelper, makeS3Client } from "../../ts/s3_filebridge.mjs";
 
 const execFileP = promisify(execFile);
 const BUCKET = "markdownify-spike";
 const MARKITDOWN = process.env.MARKITDOWN_BIN || "markitdown";
 const INLINE_CAP = Number(process.env.MD_INLINE_CAP || 200_000);
 
-const s3 = new S3Client({
-  endpoint: "http://localhost:9100", region: "us-east-1", forcePathStyle: true,
-  credentials: { accessKeyId: "spikekey", secretAccessKey: "spikesecret" },
-  requestChecksumCalculation: "WHEN_REQUIRED", responseChecksumValidation: "WHEN_REQUIRED",
-});
+const s3 = makeS3Client("http://localhost:9100", { accessKeyId: "spikekey", secretAccessKey: "spikesecret" });
 const files = new S3FileHelper(s3, BUCKET, "https://mcp.example.test");
 
 async function ensureBucket() {

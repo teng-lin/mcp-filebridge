@@ -78,15 +78,12 @@ def store_markdown(md: str, md_key: str) -> str | None:
     """PUT the .md to S3 at md_key (internal endpoint), return a presigned GET URL against the PUBLIC
     endpoint (browser-reachable) with an attachment disposition. None if S3 is unreachable."""
     try:
-        import boto3  # lazy: keeps this module importable without boto3
-        from botocore.config import Config
+        from .s3_filebridge import make_client  # lazy: keeps this module importable without boto3
 
-        cfg = Config(signature_version="s3v4", s3={"addressing_style": "path"})
-        creds = dict(aws_access_key_id=os.environ.get("S3_ACCESS_KEY"),
-                     aws_secret_access_key=os.environ.get("S3_SECRET_KEY"), region_name="us-east-1", config=cfg)
+        key, secret = os.environ.get("S3_ACCESS_KEY"), os.environ.get("S3_SECRET_KEY")
         bucket = os.environ.get("S3_BUCKET", "markdownify")
-        internal = boto3.client("s3", endpoint_url=os.environ.get("S3_ENDPOINT", "http://minio:9000"), **creds)
-        public = boto3.client("s3", endpoint_url=os.environ.get("S3_PUBLIC_ENDPOINT") or os.environ.get("S3_ENDPOINT"), **creds)
+        internal = make_client(os.environ.get("S3_ENDPOINT", "http://minio:9000"), key, secret)
+        public = make_client(os.environ.get("S3_PUBLIC_ENDPOINT") or os.environ.get("S3_ENDPOINT"), key, secret)
         disp = f'attachment; filename="{os.path.basename(md_key)}"'
         internal.put_object(Bucket=bucket, Key=md_key, Body=md.encode("utf-8"), ContentType="text/markdown; charset=utf-8")
         return public.generate_presigned_url(

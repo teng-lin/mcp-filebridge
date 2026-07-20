@@ -13,9 +13,7 @@ REQUIRED_SIGV4 = {"X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date",
 
 
 def _client(endpoint="http://s3.local:9000"):
-    return boto3.client("s3", endpoint_url=endpoint, aws_access_key_id="k",
-                        aws_secret_access_key="s", region_name="us-east-1",
-                        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}))
+    return fb.make_client(endpoint, "k", "s")
 
 
 @pytest.fixture
