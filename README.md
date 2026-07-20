@@ -1,32 +1,28 @@
-# mcp-s3-filebridge
+# mcp-filebridge
 
-A **cross-language (Python + TypeScript) file side-channel for remote MCP servers**, backed by S3-compatible presigned URLs.
+A **cross-language (Python + TypeScript) file side-channel for remote MCP servers**, backed by S3-compatible presigned URLs — plus two deployable examples and a reusable pattern for putting a **non-Python MCP server on claude.ai/ChatGPT without writing OAuth in that language**.
 
 Remote MCP hosts (claude.ai, ChatGPT, Copilot) can't move binaries through the JSON-RPC tool channel — results are size-capped and base64 inlining breaks at a few kilobytes. The fix is out-of-band: the server hands back a short-lived **signed URL**, the bytes move over HTTPS, and only a lightweight reference rides the protocol.
 
-This is a small, deliberately un-clever take on that pattern. It keeps the two genuinely valuable pieces of [`mcp_filebridge`](https://github.com/teng-lin/mcp-filebridge) — the **offer contract** and the **human upload widget** — and replaces its Python-locked HMAC/route engine with **commodity S3 presigning** (`boto3` / `@aws-sdk`). That swap is what makes it work identically in both languages with no shared binary and no FFI.
-
-## Why S3 instead of a bespoke library
-
-| | This helper (S3 presigning) | `mcp_filebridge` |
-|---|---|---|
-| Signed URL points at | the bucket (S3 / R2 / MinIO) | filebridge's routes, in your process |
-| Object store | required | none (self-contained) |
-| Crypto | AWS SigV4 (battle-tested) | its own HMAC |
-| Languages | **Python + TypeScript + any** | Python only |
-| Best when | cross-language; already run object storage | Python-only; want zero storage dep |
-
-If you only need Python and don't want a bucket, use `mcp_filebridge`. If you need more than one language, this is the lazier correct answer. Both are superseded by **MCP SEP-2631** (`files/authorizeUpload` / `authorizeDownload`) once it lands in the official SDKs — treat this as the bridge until then.
+This repo keeps the two genuinely valuable pieces of [`mcp_filebridge`](https://github.com/teng-lin/mcp-filebridge) — the **offer contract** and the **human upload widget** — and replaces its Python-locked HMAC/route engine with **commodity S3 presigning** (`boto3` / `@aws-sdk`). That swap is what makes it work identically in both languages with no shared binary and no FFI.
 
 ## What's here
 
 ```
-python/s3_filebridge.py   # the Python helper: offer_upload / offer_download / await_upload / routes / set_bucket_cors
-ts/s3_filebridge.mjs      # the TypeScript twin (@aws-sdk) — same offer JSON + widget, verbatim
+python/s3_filebridge.py   # Python helper: offer_upload / offer_download / await_upload / routes / set_bucket_cors
+ts/s3_filebridge.mjs      # TypeScript twin (@aws-sdk) — same offer JSON + widget, with the presignS3 seam
 verify_parity.py          # golden-vector test: proves Python & TS emit byte-identical offers
 offer.golden.json         # the normalized offer contract (checked in)
-examples/convertx/        # deployable example: ConvertX behind an MCP server (Docker Compose, Makefile)
+examples/convertx/        # deployable example — ConvertX (1000+ formats) behind a Python MCP server
+examples/markdownify/     # deployable example — markitdown behind a TypeScript backend + Python OAuth gateway
+tests/                    # pytest (unit + parity + integration), plus JS unit tests in the markdownify example
 ```
+
+## Two things this repo demonstrates
+
+**1. One file side-channel, two languages.** `s3_filebridge` presigns an upload/download URL so bytes move over HTTPS while only a reference rides JSON-RPC. Python and TypeScript emit **byte-identical** offers (locked by `verify_parity.py` + a golden vector), so a widget written once renders on either backend. Both sides carry a `presignS3` seam: internal ops use the in-network endpoint, presigned URLs use the public one.
+
+**2. An OAuth-terminating gateway for any-language backends.** claude.ai's connector UI needs OAuth, but re-implementing DCR/CIMD/PKCE per language is a large lift. The `markdownify` example puts a **Python gateway** (FastMCP `create_proxy` + a self-hosted OAuth provider) in front of a **TypeScript** MCP backend over stdio — so the backend does its domain work and speaks zero OAuth. This is a recognized production pattern (Kong/Obot/TrueFoundry); `tools/call` **and** the MCP-Apps widget `_meta` were both proven to survive the proxy hop, locally and over a live Cloudflare tunnel.
 
 ## The offer contract
 
@@ -38,19 +34,46 @@ examples/convertx/        # deployable example: ConvertX behind an MCP server (D
 
 `offer_download()` returns `download_ready` with a presigned `GET`. `await_upload()` blocks until the object lands (`head_object` poll).
 
-## How claude.ai actually uploads
+## The two examples
+
+| | `examples/convertx` | `examples/markdownify` |
+|---|---|---|
+| Backend language | **Python** (FastMCP directly) | **TypeScript** (`@modelcontextprotocol/sdk`, stdio) |
+| Auth | self-hosted OAuth in-process | Python **gateway** proxies to the TS backend |
+| Wraps | [ConvertX](https://github.com/C4illin/ConvertX) — 1000+ format conversions | [markitdown](https://github.com/microsoft/markitdown) — PDF/PPTX/XLSX/DOCX/image/audio → Markdown |
+| Upload | inline widget → **direct PUT to S3** | inline widget → **POST to the server, which converts on receipt** |
+| Output | `download_ready` presigned link | **context-safe**: `to_markdown` returns a preview + a clickable download link + a paging handle |
+| Deploy | Compose (MCP + ConvertX + MinIO) + tunnel | self-contained Compose (own MinIO + gateway + dedicated tunnel) |
+
+Both are live-validated behind Cloudflare tunnels and connectable from claude.ai. See each example's README.
+
+## Why S3 instead of a bespoke library
+
+| | This helper (S3 presigning) | `mcp_filebridge` |
+|---|---|---|
+| Signed URL points at | the bucket (S3 / R2 / MinIO) | filebridge's routes, in your process |
+| Object store | required | none (self-contained) |
+| Crypto | AWS SigV4 (battle-tested) | its own HMAC |
+| Languages | **Python + TypeScript + any** | Python only |
+| Best when | cross-language; already run object storage | Python-only; want zero storage dep |
+
+Both are superseded by **MCP SEP-2631** (`files/authorizeUpload` / `authorizeDownload`) once it lands in the official SDKs — treat this as the bridge until then.
+
+## How claude.ai actually moves the bytes
 
 - **Agent path:** the tool returns the presigned URL + a curl command; the model runs it in claude.ai's code sandbox. Requires the S3 domain in **Settings → Capabilities → Code execution → Additional allowed domains**.
-- **Human path:** the user opens the `/u/<shortid>` widget on the device with the file (works on mobile) and picks it. Requires bucket CORS (below).
+- **Human/widget path:** the user picks the file in the inline widget, which uploads it (direct to S3 in ConvertX; to the gateway's convert route in markdownify). Requires bucket CORS.
+- **Downloads on claude.ai:** the widget iframe is sandboxed (no in-widget downloads), so results are surfaced as **clickable links in the chat**, which are not sandboxed.
 
-## Two gotchas this repo already handles
+## Gotchas this repo already handles
 
-1. **@aws-sdk signs a default CRC32 checksum** into presigned URLs, which can break a plain `PUT` on real AWS S3 (the client sends no matching checksum header). The TS twin sets `requestChecksumCalculation: "WHEN_REQUIRED"`. Without this, Python and TS presigned URLs diverge and the TS one can 400 on S3.
-2. **Per-bucket CORS differs by backend.** AWS S3 / Cloudflare R2 use `put_bucket_cors`; **MinIO doesn't implement it** and configures CORS server-side (`MINIO_API_CORS_ALLOW_ORIGIN`, default `*`). `set_bucket_cors()` handles both.
+1. **`@aws-sdk` signs a default CRC32 checksum** into presigned URLs, which can break a plain `PUT` on real AWS S3. The TS twin sets `requestChecksumCalculation: "WHEN_REQUIRED"`.
+2. **Per-bucket CORS differs by backend.** AWS S3 / Cloudflare R2 use `put_bucket_cors`; **MinIO doesn't implement it** and configures CORS server-side (`MINIO_API_CORS_ALLOW_ORIGIN`). `set_bucket_cors()` handles both.
+3. **The `presignS3` seam.** Presigned URLs must name a **public** bucket host, not the internal container-network one — both the Python and TS helper take a separate presign client for that (regression-tested; the TS side once silently ignored it).
 
 ## Running the checks
 
-Bring up a local S3 (MinIO) on `:9100`:
+Local S3 (MinIO) on `:9100`:
 
 ```bash
 docker run -d --name minio -p 9100:9000 \
@@ -58,48 +81,21 @@ docker run -d --name minio -p 9100:9000 \
   quay.io/minio/minio:latest server /data
 ```
 
-Python helper self-check:
-
 ```bash
-pip install boto3 requests starlette
-python3 python/s3_filebridge.py
-```
+# Python helper self-check
+pip install boto3 requests starlette && python3 python/s3_filebridge.py
+# cross-language parity (needs Node + MinIO)
+cd ts && npm install && cd .. && python3 verify_parity.py
 
-Cross-language parity (needs Node + MinIO):
-
-```bash
-cd ts && npm install && cd ..
-python3 verify_parity.py     # asserts Python and TS emit byte-identical offers
-```
-
-Test suite (`pytest`):
-
-```bash
+# test suite
 pip install -r tests/requirements-dev.txt -r examples/convertx/requirements.txt
-pytest                # unit + in-process OAuth integration (no containers needed)
-pytest -m integration # +S3 round-trip vs live MinIO; ConvertX round-trip if reachable
+pytest                 # unit + in-process OAuth + cross-language parity (no containers)
+pytest -m integration  # + live MinIO round-trip; markdownify e2e if the stack is on :8090
+cd examples/markdownify && npm test    # JS unit tests (node's built-in runner)
 ```
 
-Unit tests cover the offer/widget/short-link logic, `await_upload`, and the OAuth
-pieces (config validation, SSRF guard, CIMD document validation, bearer, auth
-composition, static-client/DCR wiring). Integration tests drive the **full OAuth
-dances** — static client *and* CIMD — end to end in-process via `TestClient`
-(authorize → login → token → authenticated `/mcp`), and round-trip a file through
-real MinIO. The ConvertX conversion test is internal-only (run it via `make smoke`).
-
-The ConvertX example is a self-contained Docker Compose stack (MCP server + ConvertX + MinIO):
-
-```bash
-cd examples/convertx
-make setup   # generate .env secrets
-make up      # build + start the stack
-make smoke   # end-to-end round-trip → valid .docx
-```
-
-See [`examples/convertx/README.md`](examples/convertx/README.md) for the claude.ai deployment path (R2/S3 + tunnel).
-
-> ConvertX's HTTP contract is **unofficial** (login → `GET /` mints jobId → multipart `/upload` → `/convert` → poll `/progress` → `/download`) and its `auth` cookie is `Secure`; pin the image version. ConvertX is **AGPL-3.0** — offering it over a network triggers §13 copyleft. See `examples/convertx_mcp.py`.
+Coverage spans the offer/widget/short-link logic, `await_upload`, the OAuth pieces (config validation, SSRF-guarded CIMD, bearer, static-client/DCR wiring, full authorize→login→token dances in-process), the markdownify convert route + HMAC tickets, and **cross-language parity** of the ticket + `md_key` derivation (Python↔TypeScript, shelling out to node).
 
 ## Status
 
-Validated spikes, not a packaged release. The offer JSON + widget page are the language-neutral spec; `offer.golden.json` is the conformance anchor. Next steps if this graduates: publish as a `pip` + `npm` package pair sharing the golden vector as a conformance test, and add a SEP-2631 adapter.
+Validated spikes deployed live, not a packaged release. The offer JSON + widget page are the language-neutral spec; `offer.golden.json` is the conformance anchor. If this graduates: publish as a `pip` + `npm` package pair sharing the golden vector, and add a SEP-2631 adapter.
