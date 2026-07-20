@@ -1,6 +1,6 @@
 # Example: markdownify behind an OAuth gateway (TypeScript backend)
 
-Makes the [markdownify-mcp](https://github.com/zcaceres/markdownify-mcp) idea — "convert almost anything to Markdown" (via Microsoft [markitdown](https://github.com/microsoft/markitdown): PDF/PPTX/XLSX/DOCX/image-OCR/audio) — work on **remote** hosts (claude.ai/ChatGPT), and does it as the repo's **TypeScript** proof: a TS MCP backend that speaks zero OAuth, fronted by a Python gateway.
+Makes the [markdownify-mcp](https://github.com/zcaceres/markdownify-mcp) idea — "convert almost anything to Markdown" (via Microsoft [markitdown](https://github.com/microsoft/markitdown): **PDF/PPTX/XLSX/DOCX** out of the box; image-OCR/audio if you rebuild with the `markitdown[all]` extras) — work on **remote** hosts (claude.ai/ChatGPT), and does it as the repo's **TypeScript** proof: a TS MCP backend that speaks zero OAuth, fronted by a Python gateway.
 
 ```
 claude.ai ─JSON-RPC─▶ gateway.py (Python: OAuth + create_proxy)  ──stdio──▶  server.mjs (TS MCP backend)
@@ -70,4 +70,4 @@ The parity tests shell out to `node` to prove `_convert.mjs` and `_convert.py` s
 ## Status
 - ✅ **Live**: deployed behind a dedicated Cloudflare tunnel, connected from claude.ai — widget convert-on-upload, Copy Markdown, chat-link download, and the context-safe `to_markdown`/`read_markdown` path all verified end-to-end over the tunnel.
 - ⚠️ **Host limitation**: claude.ai's widget iframe blocks in-widget downloads/navigation (sandbox) — hence downloads are surfaced as chat links, not an in-widget button.
-- Complements ConvertX: adds **PDF/PPTX/XLSX/image-OCR/audio → markdown** (markitdown), which pandoc can't do.
+- Complements ConvertX: adds **PDF/PPTX/XLSX/DOCX → markdown** (markitdown; image-OCR/audio need a rebuild with `markitdown[all]`), which pandoc can't do.

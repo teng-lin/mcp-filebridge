@@ -11,7 +11,7 @@ This repo keeps the two genuinely valuable pieces of [`mcp_filebridge`](https://
 ```
 python/s3_filebridge.py   # Python helper: offer_upload / offer_download / await_upload / routes / set_bucket_cors
 ts/s3_filebridge.mjs      # TypeScript twin (@aws-sdk) — same offer JSON + widget, with the presignS3 seam
-verify_parity.py          # golden-vector test: proves Python & TS emit byte-identical offers
+verify_parity.py          # golden-vector test: proves Python & TS emit byte-identical normalized offers
 offer.golden.json         # the normalized offer contract (checked in)
 examples/convertx/        # deployable example — ConvertX (1000+ formats) behind a Python MCP server
 examples/markdownify/     # deployable example — markitdown behind a TypeScript backend + Python OAuth gateway
@@ -20,7 +20,7 @@ tests/                    # pytest (unit + parity + integration), plus JS unit t
 
 ## Two things this repo demonstrates
 
-**1. One file side-channel, two languages.** `s3_filebridge` presigns an upload/download URL so bytes move over HTTPS while only a reference rides JSON-RPC. Python and TypeScript emit **byte-identical** offers (locked by `verify_parity.py` + a golden vector), so a widget written once renders on either backend. Both sides carry a `presignS3` seam: internal ops use the in-network endpoint, presigned URLs use the public one.
+**1. One file side-channel, two languages.** `s3_filebridge` presigns an upload/download URL so bytes move over HTTPS while only a reference rides JSON-RPC. Python and TypeScript emit **byte-identical _normalized_** offers (locked by `verify_parity.py` + a golden vector — volatile fields like signatures and UUIDs are masked before comparing), so a widget written once renders on either backend. Both sides carry a `presignS3` seam: internal ops use the in-network endpoint, presigned URLs use the public one.
 
 **2. An OAuth-terminating gateway for any-language backends.** claude.ai's connector UI needs OAuth, but re-implementing DCR/CIMD/PKCE per language is a large lift. The `markdownify` example puts a **Python gateway** (FastMCP `create_proxy` + a self-hosted OAuth provider) in front of a **TypeScript** MCP backend over stdio — so the backend does its domain work and speaks zero OAuth. This is a recognized production pattern (Kong/Obot/TrueFoundry); `tools/call` **and** the MCP-Apps widget `_meta` were both proven to survive the proxy hop, locally and over a live Cloudflare tunnel.
 
@@ -45,17 +45,17 @@ tests/                    # pytest (unit + parity + integration), plus JS unit t
 | Output | `download_ready` presigned link | **context-safe**: `to_markdown` returns a preview + a clickable download link + a paging handle |
 | Deploy | Compose (MCP + ConvertX + MinIO) + tunnel | self-contained Compose (own MinIO + gateway + dedicated tunnel) |
 
-Both are live-validated behind Cloudflare tunnels and connectable from claude.ai. See each example's README.
+Both are deployed behind Cloudflare tunnels and connectable from claude.ai — see **[examples/convertx](examples/convertx/README.md)** and **[examples/markdownify](examples/markdownify/README.md)**. (markdownify's widget convert-on-upload and chat-link download are verified end-to-end; ConvertX's inline-widget **render** is host-gated — the server wiring is verified, the in-iframe render is confirmable only inside claude.ai/ChatGPT.)
 
 ## How claude.ai actually moves the bytes
 
 - **Agent path:** the tool returns the presigned URL + a curl command; the model runs it in claude.ai's code sandbox. Requires the S3 domain in **Settings → Capabilities → Code execution → Additional allowed domains**.
-- **Human/widget path:** the user picks the file in the inline widget, which uploads it (direct to S3 in ConvertX; to the gateway's convert route in markdownify). Requires bucket CORS.
+- **Human/widget path:** the user picks the file in the inline widget, which uploads it — **direct to S3 in ConvertX** (needs bucket CORS) or **to the gateway's convert route in markdownify** (route-level CORS, no bucket CORS needed).
 - **Downloads on claude.ai:** the widget iframe is sandboxed (no in-widget downloads), so results are surfaced as **clickable links in the chat**, which are not sandboxed.
 
 ## Gotchas this repo already handles
 
-1. **`@aws-sdk` signs a default CRC32 checksum** into presigned URLs, which can break a plain `PUT` on real AWS S3. The TS twin sets `requestChecksumCalculation: "WHEN_REQUIRED"`.
+1. **`@aws-sdk` signs a default CRC32 checksum** into presigned URLs, which can break a plain `PUT` on real AWS S3. The TS twin sets `requestChecksumCalculation: "WHEN_REQUIRED"` on the S3 client it constructs — a library consumer passing their own client must set it too.
 2. **Per-bucket CORS differs by backend.** AWS S3 / Cloudflare R2 use `put_bucket_cors`; **MinIO doesn't implement it** and configures CORS server-side (`MINIO_API_CORS_ALLOW_ORIGIN`). `set_bucket_cors()` handles both.
 3. **The `presignS3` seam.** Presigned URLs must name a **public** bucket host, not the internal container-network one — both the Python and TS helper take a separate presign client for that (regression-tested; the TS side once silently ignored it).
 
@@ -86,4 +86,4 @@ Coverage spans the offer/widget/short-link logic, `await_upload`, the OAuth piec
 
 ## Status
 
-Validated spikes deployed live, not a packaged release. The offer JSON + widget page are the language-neutral spec; `offer.golden.json` is the conformance anchor. If this graduates: publish as a `pip` + `npm` package pair sharing the golden vector, and add a SEP-2631 adapter.
+Deployed live and tested end-to-end, but not yet a packaged release. The offer JSON + widget page are the language-neutral spec; `offer.golden.json` is the conformance anchor. If this graduates: publish as a `pip` + `npm` package pair sharing the golden vector, and add a SEP-2631 adapter.

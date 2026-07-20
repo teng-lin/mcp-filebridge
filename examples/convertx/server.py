@@ -281,7 +281,7 @@ def serve():
 
 # ---- smoke self-check (against a running stack) -------------------------- #
 def smoke():
-    up = request_upload("spike.md")
+    up = _mint_upload("spike.md")
     assert {"human_upload", "agent_upload"} <= up.keys(), up
     r = requests.put(up["agent_upload"]["url"], data=b"# Smoke\n\ndeployment check.\n")
     assert r.status_code == 200, r.status_code
