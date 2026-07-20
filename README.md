@@ -9,13 +9,13 @@ This repo keeps the two genuinely valuable pieces of [`mcp_filebridge`](https://
 ## What's here
 
 ```
-python/s3_filebridge.py   # Python helper: offer_upload / offer_download / await_upload / routes / set_bucket_cors
-ts/s3_filebridge.mjs      # TypeScript twin (@aws-sdk) — same offer JSON + widget, with the presignS3 seam
+mcp_filebridge/           # the Python library (pip install -e .): s3_filebridge, oauth, widget, convert
+ts/                       # the JS library: s3_filebridge.mjs (@aws-sdk twin) + convert.mjs (ticket/md_key)
 verify_parity.py          # golden-vector test: proves Python & TS emit byte-identical normalized offers
 offer.golden.json         # the normalized offer contract (checked in)
 examples/convertx/        # deployable example — ConvertX (1000+ formats) behind a Python MCP server
 examples/markdownify/     # deployable example — markitdown behind a TypeScript backend + Python OAuth gateway
-tests/                    # pytest (unit + parity + integration), plus JS unit tests in the markdownify example
+tests/                    # pytest (unit + parity + integration); JS unit tests live in ts/
 ```
 
 ## Two things this repo demonstrates
@@ -71,7 +71,7 @@ docker run -d --name minio -p 9100:9000 \
 
 ```bash
 # Python helper self-check
-pip install boto3 requests starlette && python3 python/s3_filebridge.py
+pip install -e . && python3 -m mcp_filebridge.s3_filebridge
 # cross-language parity (needs Node + MinIO)
 cd ts && npm install && cd .. && python3 verify_parity.py
 

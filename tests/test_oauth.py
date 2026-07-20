@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-import oauth
+from mcp_filebridge import oauth
 
 STRONG = "a-strong-password-16+"
 BASE = "https://host.example"

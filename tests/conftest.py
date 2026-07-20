@@ -7,9 +7,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "python"))
-sys.path.insert(0, str(ROOT / "examples" / "convertx"))
-sys.path.insert(0, str(ROOT / "examples" / "markdownify"))
+sys.path.insert(0, str(ROOT))  # repo root, so `import mcp_filebridge` works without `pip install -e .`
 
 
 def _reachable(host: str, port: int) -> bool:
@@ -35,7 +33,7 @@ def make_oauth_app(monkeypatch, *, password=STRONG_PW, base_url=BASE_URL, bearer
                    client_id=None, client_secret=None, allow_loopback=False):
     """Assemble a FastMCP app (one `ping` tool) wired with the real oauth.py
     provider, for driving the full OAuth flow via Starlette's TestClient."""
-    import oauth
+    from mcp_filebridge import oauth
     from fastmcp import FastMCP
 
     env = {"MCP_OAUTH_PASSWORD": password, "MCP_OAUTH_BASE_URL": base_url}

@@ -9,8 +9,8 @@ claude.ai ─JSON-RPC─▶ gateway.py (Python: OAuth + create_proxy)  ──std
 ```
 
 - **`server.mjs`** — a real TypeScript MCP server (stdio, `@modelcontextprotocol/sdk`). Does **no auth**. Tools below.
-- **`gateway.py`** — an **OAuth-terminating proxy** (FastMCP `create_proxy`) that spawns `server.mjs`, owns OAuth (reusing `examples/convertx/oauth.py`: static client + CIMD + password `/login`), validates the token, forwards `/mcp` to the backend, **and** hosts the `POST /u/convert` route (in `_convert.py`).
-- **`_convert.mjs` / `_convert.py`** — the shared, byte-compatible ticket + `md_key` logic (JS mints, Python verifies), kept pure so it's unit- and parity-testable.
+- **`gateway.py`** — an **OAuth-terminating proxy** (FastMCP `create_proxy`) that spawns `server.mjs`, owns OAuth (reusing the shared `mcp_filebridge.oauth`: static client + CIMD + password `/login`), validates the token, forwards `/mcp` to the backend, **and** hosts the `POST /u/convert` route (from `mcp_filebridge.convert`).
+- **`ts/convert.mjs` / `mcp_filebridge/convert.py`** — the shared, byte-compatible ticket + `md_key` logic (JS mints, Python verifies), in the libraries so any example can reuse them; kept pure so they're unit- and parity-testable.
 
 ## Tools
 
@@ -58,14 +58,14 @@ A tool result enters the model's context and is re-sent every turn. A 100-page P
 Pure logic (HMAC tickets, `md_key` derivation, convert-route control flow) is unit-tested in **both languages**, with a cross-language parity suite and a live end-to-end integration test:
 
 ```bash
-cd examples/markdownify && npm test        # JS units (node --test) — _convert.mjs
+cd ts && npm test                          # JS units (node --test) — ts/convert.mjs
 # from repo root:
 pip install -r tests/requirements-dev.txt
 pytest tests/test_markdownify_gateway.py tests/test_markdownify_parity.py   # units + JS↔Py parity
 pytest -m integration tests/test_markdownify_integration.py                 # live stack on :8090
 ```
 
-The parity tests shell out to `node` to prove `_convert.mjs` and `_convert.py` stay byte-compatible (a drift silently breaks widget→chat reuse or convert auth). The integration test drives `upload_file → /u/convert → to_markdown reuse → read_markdown` paging and asserts a big file's preview stays capped.
+The parity tests shell out to `node` to prove `ts/convert.mjs` and `mcp_filebridge/convert.py` stay byte-compatible (a drift silently breaks widget→chat reuse or convert auth). The integration test drives `upload_file → /u/convert → to_markdown reuse → read_markdown` paging and asserts a big file's preview stays capped.
 
 ## Status
 - ✅ **Live**: deployed behind a dedicated Cloudflare tunnel, connected from claude.ai — widget convert-on-upload, Copy Markdown, chat-link download, and the context-safe `to_markdown`/`read_markdown` path all verified end-to-end over the tunnel.

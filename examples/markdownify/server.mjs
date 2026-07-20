@@ -19,7 +19,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { S3FileHelper } from "../../ts/s3_filebridge.mjs";
-import { mdKeyFor, mintTicket } from "./_convert.mjs";
+import { mdKeyFor, mintTicket } from "../../ts/convert.mjs";
 
 const execFileP = promisify(execFile);
 const env = process.env;
@@ -47,7 +47,7 @@ const widgetDomain = createHash("sha256").update(PUBLIC_BASE + "/mcp").digest("h
 // Signed ticket for the gateway's POST /u/convert/<token> route — the widget uploads bytes
 // straight to the server (like notebooklm's /files/ul), which converts on receipt. HMAC key is
 // shared with the Python gateway via env (it spawns this backend with the same os.environ).
-// mdKeyFor / mintTicket live in _convert.mjs (byte-compatible with the Python twin _convert.py).
+// mdKeyFor / mintTicket live in ts/convert.mjs (byte-compatible with the Python twin mcp_filebridge/convert.py).
 // The HMAC key is shared with the gateway via env (it spawns this backend with the same os.environ).
 const SIGN_KEY = env.MCP_UPLOAD_SIGNING_KEY || env.MCP_BEARER_TOKEN || "dev-key";
 const mintConvertUrl = (srcKey) => `${PUBLIC_BASE}/u/convert/${mintTicket(srcKey, SIGN_KEY)}`;

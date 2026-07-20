@@ -22,9 +22,8 @@ import boto3
 import requests
 from botocore.client import Config
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "python"))
-from s3_filebridge import S3FileHelper
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))  # repo root
+from mcp_filebridge.s3_filebridge import S3FileHelper
 
 
 # ---- config (env with local-compose defaults) ---------------------------- #
@@ -240,7 +239,7 @@ class _LogMiddleware(Middleware):
 def build_server(auth=None):
     from fastmcp import FastMCP
 
-    from widget import register_upload_widget
+    from mcp_filebridge.widget import register_upload_widget
     mcp = FastMCP(name="convertx-filebridge", auth=auth)
     mcp.add_middleware(_LogMiddleware())
     # Step 1 (upload_file, from the widget module) → Step 2 (convert). list_conversions
@@ -259,7 +258,7 @@ def serve():
     OAuth routes (/authorize, /token, /register, metadata, /login) and the
     /u/<id> upload widget are public by design."""
     import uvicorn
-    from oauth import build_auth, build_oauth_provider, get_oauth_config
+    from mcp_filebridge.oauth import build_auth, build_oauth_provider, get_oauth_config
 
     oauth_cfg = get_oauth_config()  # None unless MCP_OAUTH_PASSWORD + BASE_URL set
     loopback = MCP_HOST in ("127.0.0.1", "::1", "localhost")

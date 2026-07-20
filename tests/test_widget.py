@@ -10,7 +10,7 @@ import json
 import pytest
 from fastmcp import FastMCP
 
-import widget
+from mcp_filebridge import widget
 
 S3_PUBLIC = "https://s3.hantekllc.com"
 BASE = "https://convertx.hantekllc.com"

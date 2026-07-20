@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
-sys.path.insert(0, str(Path(__file__).parent / "python"))
-import s3_filebridge as fb  # the Python helper
+sys.path.insert(0, str(Path(__file__).parent))  # repo root, so `mcp_filebridge` imports without install
+from mcp_filebridge import s3_filebridge as fb  # the Python helper
 import boto3
 from botocore.client import Config
 

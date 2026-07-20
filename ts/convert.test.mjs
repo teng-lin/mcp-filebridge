@@ -1,7 +1,7 @@
-// Unit tests for the pure convert helpers. Run: node --test _convert.test.mjs
+// Unit tests for the pure convert helpers. Run: node --test convert.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { b64url, b64urlDecode, mdKeyFor, mintTicket, verifyTicket } from "./_convert.mjs";
+import { b64url, b64urlDecode, mdKeyFor, mintTicket, verifyTicket } from "./convert.mjs";
 
 test("b64url is url-safe (no + / =) and round-trips", () => {
   const s = b64url(Buffer.from("hello?/+world>>>"));

@@ -18,10 +18,9 @@ from fastmcp.server import create_proxy
 from fastmcp.server.providers.proxy import ProxyClient
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "examples" / "convertx"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import oauth  # noqa: E402  (build_auth / get_oauth_config / build_oauth_provider)
-from _convert import register_convert_route  # noqa: E402
+sys.path.insert(0, str(ROOT))  # repo root, so `mcp_filebridge` imports without install
+from mcp_filebridge import oauth  # noqa: E402  (build_auth / get_oauth_config / build_oauth_provider)
+from mcp_filebridge.convert import register_convert_route  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 BACKEND = str(HERE / "server.mjs")

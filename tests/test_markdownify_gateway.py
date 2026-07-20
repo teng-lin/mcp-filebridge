@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-import _convert as cv
+from mcp_filebridge import convert as cv
 
 KEY = "unit-test-signing-key"
 

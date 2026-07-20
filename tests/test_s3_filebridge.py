@@ -6,7 +6,7 @@ import boto3
 import pytest
 from botocore.client import Config
 
-import s3_filebridge as fb
+from mcp_filebridge import s3_filebridge as fb
 
 REQUIRED_SIGV4 = {"X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date",
                   "X-Amz-Expires", "X-Amz-Signature", "X-Amz-SignedHeaders"}

@@ -1,5 +1,5 @@
 # markdownify gateway image: Python OAuth gateway + Node TS backend + markitdown.
-# Build context is the REPO ROOT (so it can COPY ts/ and examples/convertx/oauth.py).
+# Build context is the REPO ROOT (so it can COPY ts/ and the mcp_filebridge package).
 FROM node:20-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,11 +14,13 @@ ENV PATH=/venv/bin:$PATH MARKITDOWN_BIN=markitdown
 
 WORKDIR /app
 COPY ts/ /app/ts/
-COPY examples/convertx/oauth.py /app/examples/convertx/oauth.py
+# The shared library (oauth + convert route), installed editable; deps already in the venv → --no-deps.
+COPY pyproject.toml /app/pyproject.toml
+COPY mcp_filebridge/ /app/mcp_filebridge/
+RUN /venv/bin/pip install --no-cache-dir -e . --no-deps
 COPY examples/markdownify/package.json examples/markdownify/package-lock.json /app/examples/markdownify/
 RUN cd /app/examples/markdownify && (npm ci --omit=dev || npm install --omit=dev)
-COPY examples/markdownify/server.mjs examples/markdownify/_convert.mjs \
-     examples/markdownify/gateway.py examples/markdownify/_convert.py /app/examples/markdownify/
+COPY examples/markdownify/server.mjs examples/markdownify/gateway.py /app/examples/markdownify/
 
 RUN useradd --create-home --uid 10001 app && mkdir -p /data && chown 10001:10001 /data
 USER app

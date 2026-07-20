@@ -105,7 +105,7 @@ def test_wrong_password_rejected(monkeypatch):
 
 def test_cimd_full_flow(monkeypatch):
     # ChatGPT-style URL client_id; mock the CIMD fetch (validation covered in unit tests).
-    import oauth
+    from mcp_filebridge import oauth
     cimd_url = "https://chatgpt.example/client.json"
     cb = "https://chatgpt.com/connector/oauth/testcb"
     monkeypatch.setattr(oauth, "_fetch_cimd",
@@ -130,7 +130,7 @@ def test_s3_presigned_roundtrip_minio():
     import requests
     from botocore.client import Config
 
-    import s3_filebridge as fb
+    from mcp_filebridge import s3_filebridge as fb
 
     s3 = boto3.client("s3", endpoint_url="http://localhost:9100",
                       aws_access_key_id="spikekey", aws_secret_access_key="spikesecret",
