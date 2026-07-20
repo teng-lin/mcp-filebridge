@@ -47,18 +47,6 @@ tests/                    # pytest (unit + parity + integration), plus JS unit t
 
 Both are live-validated behind Cloudflare tunnels and connectable from claude.ai. See each example's README.
 
-## Why S3 instead of a bespoke library
-
-| | This helper (S3 presigning) | `mcp_filebridge` |
-|---|---|---|
-| Signed URL points at | the bucket (S3 / R2 / MinIO) | filebridge's routes, in your process |
-| Object store | required | none (self-contained) |
-| Crypto | AWS SigV4 (battle-tested) | its own HMAC |
-| Languages | **Python + TypeScript + any** | Python only |
-| Best when | cross-language; already run object storage | Python-only; want zero storage dep |
-
-Both are superseded by **MCP SEP-2631** (`files/authorizeUpload` / `authorizeDownload`) once it lands in the official SDKs — treat this as the bridge until then.
-
 ## How claude.ai actually moves the bytes
 
 - **Agent path:** the tool returns the presigned URL + a curl command; the model runs it in claude.ai's code sandbox. Requires the S3 domain in **Settings → Capabilities → Code execution → Additional allowed domains**.
