@@ -98,6 +98,17 @@ cd ts && npm test                # JS unit tests (node's built-in runner)
 
 Coverage spans the offer/widget/short-link logic, `await_upload`, the OAuth pieces (config validation, SSRF-guarded CIMD, bearer, static-client/DCR wiring, full authorize→login→token dances in-process), the markdownify convert route + HMAC tickets, and **cross-language parity** of the ticket + `md_key` derivation (Python↔TypeScript, shelling out to node).
 
+## Relationship to MCP SEP-2631
+
+[SEP-2631 (File Objects and Transfer)](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2631) is the emerging standard for MCP file transfer. It's easy to read it as "this makes filebridge obsolete" — it doesn't. SEP-2631 standardizes the **control plane** (`files/authorizeUpload` / `files/authorizeDownload`, opaque `mcp-file://` handles, `x-mcp-file` input declarations) and is deliberately **transport-agnostic about the data plane** — a presigned-S3 server and a server-broker upload both conform. So filebridge (S3 presign + the `/u/convert` broker) is a **conforming data-plane implementation that a SEP-2631 control plane sits *in front of*, not a thing it replaces.**
+
+Two things worth knowing:
+
+- **It's client-orchestrated.** The client calls `authorizeUpload`, uploads with its **native picker**, then invokes the tool with the file URI — which cleanly avoids the sandboxed-iframe download/completion problems our server-side widget had to work around. But **no major client implements it yet**, so until claude.ai/Desktop do, the MCP-Apps widget in these examples remains the working interim path.
+- **Two gaps it leaves for servers like ours.** (1) **Server-side URL fetch** — the `docling` example has the *server* fetch a URL; a SEP `mcp-file://` handle resolves only via the *client*, so you still need a real reachable presigned URL (what filebridge mints). (2) **Large-result paging** — SEP-2631 moves file *bytes* out-of-band, but a tool returning big *text the model must read* (a converted document) still floods context; that's what `to_markdown`'s preview + `read_markdown` paging solve, and it's out of SEP-2631's scope.
+
+If this graduates, the natural shape is: a **SEP-2631 control-plane adapter** (map `authorizeUpload/Download` onto `offer_upload/offer_download`) in front of this data plane, keeping the widget as a fallback for clients that haven't adopted the SEP.
+
 ## Status
 
-Deployed live and tested end-to-end, but not yet a packaged release. The offer JSON + widget page are the language-neutral spec; `offer.golden.json` is the conformance anchor. If this graduates: publish as a `pip` + `npm` package pair sharing the golden vector, and add a SEP-2631 adapter.
+Deployed live and tested end-to-end, but not yet a packaged release. The offer JSON + widget page are the language-neutral spec; `offer.golden.json` is the conformance anchor. If this graduates: publish as a `pip` + `npm` package pair sharing the golden vector.
