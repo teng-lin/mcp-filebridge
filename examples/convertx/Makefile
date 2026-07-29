@@ -15,7 +15,7 @@ t=re.sub(r'CONVERTX_PASSWORD=.*','CONVERTX_PASSWORD='+secrets.token_urlsafe(18),
 p.write_text(t)"; \
 	  echo "wrote .env with generated secrets"; }
 
-up: ## Build and start the stack (local: MinIO + ConvertX + MCP)
+up: ## Build and start ConvertX + MCP (shared object store must be running)
 	$(COMPOSE) up -d --build
 
 down: ## Stop and remove the stack (keeps volumes)
@@ -28,5 +28,5 @@ config: ## Validate the merged compose config
 	$(COMPOSE) config
 
 smoke: ## Round-trip a file end to end (inside the compose network)
-	$(COMPOSE) exec -e S3_PUBLIC_ENDPOINT=http://minio:9000 \
+	$(COMPOSE) exec -e S3_PUBLIC_ENDPOINT=http://object-store:9000 \
 	  convertx-mcp python examples/convertx/server.py --smoke

@@ -20,7 +20,7 @@ claude.ai ──JSON-RPC (tools + presigned URLs)──▶ convertx-mcp ──HT
 
 ```bash
 make setup      # writes .env with generated secrets
-make up         # build + start MinIO + ConvertX + the MCP server
+make up         # build + start ConvertX + the MCP server (shared object store already running)
 make smoke      # end-to-end: upload offer → PUT → convert → download → valid .docx
 make logs       # tail the server
 make down       # stop
@@ -32,14 +32,14 @@ The MCP endpoint is `http://localhost:9400/mcp` (add `Authorization: Bearer <MCP
 
 Presigned URLs are consumed by the **client** (your browser / claude.ai's sandbox), so they must name a **public** bucket host — which usually isn't the internal one the server uses on the container network. The server therefore holds two S3 clients:
 
-- `S3_ENDPOINT` (`http://minio:9000`) — internal `get`/`put`/`head`.
-- `S3_PUBLIC_ENDPOINT` (`http://localhost:9100`) — the host baked into presigned URLs. `generate_presigned_url` only *signs* (no network), so the presign client never needs to reach it from inside the container.
+- `S3_ENDPOINT` (`http://object-store:9000`) — private `get`/`put`/`head` over the external `object-storage` network.
+- `S3_PUBLIC_ENDPOINT` (`https://s3.<domain>`) — the shared S3 tunnel host baked into presigned URLs. `generate_presigned_url` only *signs* (no network), so the presign client never needs to reach it from inside the container.
 
 ## Connect from claude.ai
 
-Two things must be publicly reachable: the **MCP endpoint** and the **bucket**.
+Two things must be publicly reachable: the **MCP endpoint** and the shared **bucket service**.
 
-1. **Bucket:** the simplest correct choice is **Cloudflare R2 or AWS S3** — one public endpoint, reachable by both the server and the client, no MinIO to expose. Set `S3_PUBLIC_ENDPOINT` (and `S3_ENDPOINT`) to it and drop the `minio` service. On S3/R2, `set_bucket_cors()` also configures browser CORS for the upload widget (MinIO does it via `MINIO_API_CORS_ALLOW_ORIGIN`).
+1. **Bucket:** provision a dedicated `convertx` account and bucket on the shared object store. Set `S3_ENDPOINT=http://object-store:9000` and `S3_PUBLIC_ENDPOINT` to its separate public S3 tunnel hostname. The shared MinIO service sets browser CORS globally with `MINIO_API_CORS_ALLOW_ORIGIN`.
 2. **MCP endpoint:** put `convertx-mcp` behind a tunnel and set `PUBLIC_BASE_URL` to the tunnel hostname:
    ```bash
    # set CF_TUNNEL_TOKEN in .env, route the hostname → http://convertx-mcp:9400

@@ -34,22 +34,22 @@ Re-implementing DCR/CIMD/PKCE on the TS SDK is a large lift. Instead a **languag
 Security notes: the token audience is the **gateway's** URI; the gateway **never forwards the client token** to the backend (confused-deputy). The backend is a **stdio child** of the gateway — not network-reachable at all — which keeps it off the internet cleanly.
 
 ## Run it
-Self-contained stack — its own MinIO, gateway, and a dedicated Cloudflare tunnel on its own `markdownify_default` network. Shares nothing with the ConvertX stack (ports 9101/8090 differ so both run on one host).
+The gateway uses the shared object store through the external `object-storage` Docker network and binds host loopback port 8090 for the consolidated apps tunnel.
 
 ```bash
-cp .env.example .env      # set MCP_BEARER_TOKEN, OAuth (for claude.ai), APPS_CF_TUNNEL_TOKEN
+cp .env.example .env      # set MCP_BEARER_TOKEN, OAuth, and the dedicated markdownify S3 account
 docker compose up -d --build
 ```
 
 ## Connect from claude.ai / ChatGPT
-The `cloudflared` service runs a **dedicated** tunnel (`APPS_CF_TUNNEL_TOKEN`, forced to `http2` because QUIC/UDP 7844 egress is often blocked). Give that tunnel two Public Hostnames in the Cloudflare dashboard — both resolve by docker-DNS because the connector is on this stack's network, and the service **Type must be HTTP** (the origins are plain HTTP):
+The consolidated apps tunnel publishes the gateway; the separate shared-S3 tunnel publishes MinIO:
 
 | Hostname | Service (Type: HTTP) |
 |---|---|
-| `s3-markdownify.<domain>` | `minio:9000` — presigned upload/download target |
-| `markdownify.<domain>` | `gateway:8090` — the MCP endpoint |
+| `s3.<domain>` | `object-store:9000` on the S3 tunnel — presigned upload/download target |
+| `markdownify.<domain>` | `gateway:8090` on the apps tunnel — the MCP endpoint |
 
-Set `S3_PUBLIC_ENDPOINT`/`PUBLIC_BASE_URL`/`MCP_OAUTH_BASE_URL` to those hostnames, add the connector at `https://markdownify.<domain>/mcp`, and enter `MCP_OAUTH_PASSWORD` at `/login`. For a managed bucket instead of the bundled MinIO, point `S3_ENDPOINT`/`S3_PUBLIC_ENDPOINT` at R2/S3.
+Set `S3_PUBLIC_ENDPOINT`/`PUBLIC_BASE_URL`/`MCP_OAUTH_BASE_URL` to those hostnames, add the connector at `https://markdownify.<domain>/mcp`, and enter `MCP_OAUTH_PASSWORD` at `/login`. The Compose profile `standalone-tunnel` remains available only for deployments that do not use the consolidated apps tunnel.
 
 ## Context safety (why `to_markdown` doesn't just return the markdown)
 A tool result enters the model's context and is re-sent every turn. A 100-page PDF is ~75K tokens — dumping it would tax the whole conversation or exceed the window. So `to_markdown` returns a **preview (`MD_PREVIEW_BYTES`, default 6000 ≈ 1.5K tokens) + a download link + a paging handle**; the model pages with `read_markdown` only what it needs. `full=true` inlines only up to `MD_FULL_CAP` (60KB). The full content always lives in the widget + S3, so nothing is lost. (Verified: a 107KB doc puts ~1.7K tokens into context.)
@@ -68,6 +68,6 @@ cd python && pytest -m integration tests/test_markdownify_integration.py        
 The parity tests shell out to `node` to prove `ts/convert.mjs` and `mcp_filebridge/convert.py` stay byte-compatible (a drift silently breaks widget→chat reuse or convert auth). The integration test drives `upload_file → /u/convert → to_markdown reuse → read_markdown` paging and asserts a big file's preview stays capped.
 
 ## Status
-- ✅ **Live**: deployed behind a dedicated Cloudflare tunnel, connected from claude.ai — widget convert-on-upload, Copy Markdown, chat-link download, and the context-safe `to_markdown`/`read_markdown` path all verified end-to-end over the tunnel.
+- ✅ **Live**: deployed behind the consolidated Cloudflare apps tunnel, connected from claude.ai — widget convert-on-upload, Copy Markdown, chat-link download, and the context-safe `to_markdown`/`read_markdown` path all verified end-to-end over the tunnel.
 - ⚠️ **Host limitation**: claude.ai's widget iframe blocks in-widget downloads/navigation (sandbox) — hence downloads are surfaced as chat links, not an in-widget button.
 - Complements ConvertX: adds **PDF/PPTX/XLSX/DOCX → markdown** (markitdown; image-OCR/audio need a rebuild with `markitdown[all]`), which pandoc can't do.

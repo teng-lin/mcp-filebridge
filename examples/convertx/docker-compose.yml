@@ -1,28 +1,14 @@
-# ConvertX MCP stack: the MCP server + the ConvertX converter + a MinIO bucket.
+# ConvertX MCP stack: the MCP server + converter, backed by the shared object store.
 #
 #   cp .env.example .env   # set MCP_BEARER_TOKEN + CONVERTX_JWT_SECRET
 #   docker compose up -d --build
 #   make smoke             # round-trip a file end to end
 #
-# The MCP server is the only thing you expose. For real claude.ai use, point the
-# bucket at Cloudflare R2 / AWS S3 (a single PUBLIC endpoint) instead of the bundled
-# MinIO, and put the MCP server behind a tunnel:
+# The MCP server binds host loopback only. A consolidated host-networked tunnel can
+# publish it, or the optional standalone connector can be enabled:
 #   docker compose --profile cloudflare up -d --build
 # See README.md ("Connect from claude.ai").
 services:
-  minio:
-    image: quay.io/minio/minio:latest
-    command: server /data
-    restart: unless-stopped
-    environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-spikekey}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-spikesecret}
-      MINIO_API_CORS_ALLOW_ORIGIN: "*"   # MinIO configures CORS here (no PutBucketCors API)
-    # Published so presigned URLs (S3_PUBLIC_ENDPOINT=http://localhost:9100) resolve
-    # from the host browser / curl. In prod you'd use R2/S3 and drop this service.
-    ports: ["9100:9000"]
-    volumes: ["minio-data:/data"]
-
   convertx:
     image: ghcr.io/c4illin/convertx:latest
     restart: unless-stopped
@@ -39,14 +25,12 @@ services:
     image: convertx-filebridge:local
     restart: unless-stopped
     environment:
-      # server -> bucket (internal compose DNS); server -> ConvertX (internal)
-      S3_ENDPOINT: http://minio:9000
+      # Private shared-store endpoint for server writes; public endpoint for presigned URLs.
+      S3_ENDPOINT: ${S3_ENDPOINT:?set S3_ENDPOINT to the shared store's private endpoint}
       CONVERTX_URL: http://convertx:3000
-      # client -> bucket: the PUBLIC host baked into presigned URLs. Local = the
-      # published MinIO port; prod = your R2/S3 endpoint.
-      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9100}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-spikekey}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-spikesecret}
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:?set S3_PUBLIC_ENDPOINT to the shared store's public origin}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set the convertx S3 access key}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?set the convertx S3 secret key}
       S3_BUCKET: ${S3_BUCKET:-convertx}
       CONVERTX_EMAIL: ${CONVERTX_EMAIL:-mcp@convertx.local}
       CONVERTX_PASSWORD: ${CONVERTX_PASSWORD:?set CONVERTX_PASSWORD in .env}
@@ -66,11 +50,13 @@ services:
       MCP_OAUTH_TRUST_PROXY: "1"                      # behind Cloudflare: trust CF-Connecting-IP for the login throttle
       MCP_HOST: "0.0.0.0"
       MCP_ALLOW_EXTERNAL_BIND: "1"       # 0.0.0.0 bind is intentional; bearer/OAuth still enforced
-    ports: ["${MCP_HOST_PORT:-9400}:9400"]
+    ports: ["127.0.0.1:${MCP_HOST_PORT:-9400}:9400"]
     volumes: ["oauth-state:/data"]       # OAuth client registry + tokens (a full-account secret)
     depends_on:
-      minio: { condition: service_started }
       convertx: { condition: service_started }
+    networks:
+      default:
+      object-storage:
 
   # --- Optional: expose the MCP server to claude.ai over HTTPS (needs a CF tunnel) --
   cloudflared:
@@ -84,6 +70,10 @@ services:
       convertx-mcp: { condition: service_healthy }
 
 volumes:
-  minio-data:
   convertx-data:
   oauth-state:
+
+networks:
+  object-storage:
+    external: true
+    name: object-storage
